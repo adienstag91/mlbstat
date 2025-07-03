@@ -1,0 +1,11 @@
+YANKEES ENHANCED BATCH VALIDATION REPORT
+==================================================
+
+Total Games: 5
+Successful Games: 0
+Failed Games: 5
+Games with Issues: 0
+Total Player Discrepancies: 0
+
+DETAILED PLAYER DISCREPANCIES:
+----------------------------------------

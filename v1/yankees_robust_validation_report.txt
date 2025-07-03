@@ -1,0 +1,17 @@
+YANKEES ROBUST BATCH VALIDATION REPORT
+==================================================
+
+Total Games: 5
+Successful Games: 5
+Failed Games: 0
+Games with Issues: 5
+Total Player Discrepancies: 15
+
+PROBLEMATIC GAMES:
+99.7% - https://www.baseball-reference.com/boxes/NYA/NYA202503270.shtml
+98.6% - https://www.baseball-reference.com/boxes/NYA/NYA202503290.shtml
+99.3% - https://www.baseball-reference.com/boxes/NYA/NYA202503300.shtml
+99.0% - https://www.baseball-reference.com/boxes/NYA/NYA202504010.shtml
+99.7% - https://www.baseball-reference.com/boxes/NYA/NYA202504020.shtml
+
+FAILED GAMES:

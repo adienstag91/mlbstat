@@ -1,0 +1,10 @@
+YANKEES SEASON BATCH VALIDATION REPORT
+==================================================
+
+Total Games: 0
+Games with Issues: 0
+Total Player Discrepancies: 0
+
+PROBLEMATIC GAMES:
+
+DETAILED DISCREPANCIES:

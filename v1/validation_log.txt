@@ -1,0 +1,45 @@
+2025-06-16 12:30:31,314 - INFO - Starting batch validation of 15 games...
+2025-06-16 12:30:31,314 - INFO - Processing game 1/15
+2025-06-16 12:30:31,314 - INFO - Validating: https://www.baseball-reference.com/boxes/NYA/NYA202505160.shtml
+2025-06-16 12:31:02,377 - ERROR - Error validating https://www.baseball-reference.com/boxes/NYA/NYA202505160.shtml: Page.goto: Timeout 30000ms exceeded.
+Call log:
+  - navigating to "https://www.baseball-reference.com/boxes/NYA/NYA202505160.shtml", waiting until "load"
+
+2025-06-16 12:31:04,383 - INFO - Processing game 2/15
+2025-06-16 12:31:04,383 - INFO - Validating: https://www.baseball-reference.com/boxes/BOS/BOS202505160.shtml
+2025-06-16 12:31:10,697 - INFO - Processing game 3/15
+2025-06-16 12:31:10,701 - INFO - Validating: https://www.baseball-reference.com/boxes/LAD/LAD202505160.shtml
+2025-06-16 12:31:13,531 - ERROR - Error validating https://www.baseball-reference.com/boxes/LAD/LAD202505160.shtml: No objects to concatenate
+2025-06-16 12:31:15,536 - INFO - Processing game 4/15
+2025-06-16 12:31:15,536 - INFO - Validating: https://www.baseball-reference.com/boxes/HOU/HOU202505160.shtml
+2025-06-16 12:31:18,053 - ERROR - Error validating https://www.baseball-reference.com/boxes/HOU/HOU202505160.shtml: No objects to concatenate
+2025-06-16 12:31:20,059 - INFO - Processing game 5/15
+2025-06-16 12:31:20,061 - INFO - Validating: https://www.baseball-reference.com/boxes/ATL/ATL202505160.shtml
+2025-06-16 12:31:22,592 - ERROR - Error validating https://www.baseball-reference.com/boxes/ATL/ATL202505160.shtml: No objects to concatenate
+2025-06-16 12:31:24,595 - INFO - Processing game 6/15
+2025-06-16 12:31:24,596 - INFO - Validating: https://www.baseball-reference.com/boxes/SF/SF202505160.shtml
+2025-06-16 12:31:27,856 - ERROR - Error validating https://www.baseball-reference.com/boxes/SF/SF202505160.shtml: No objects to concatenate
+2025-06-16 12:31:29,862 - INFO - Processing game 7/15
+2025-06-16 12:31:29,862 - INFO - Validating: https://www.baseball-reference.com/boxes/PHI/PHI202505160.shtml
+2025-06-16 12:31:44,474 - INFO - Processing game 8/15
+2025-06-16 12:31:44,475 - INFO - Validating: https://www.baseball-reference.com/boxes/SD/SD202505160.shtml
+2025-06-16 12:31:46,846 - ERROR - Error validating https://www.baseball-reference.com/boxes/SD/SD202505160.shtml: No objects to concatenate
+2025-06-16 12:31:48,851 - INFO - Processing game 9/15
+2025-06-16 12:31:48,853 - INFO - Validating: https://www.baseball-reference.com/boxes/NYA/NYA202505170.shtml
+2025-06-16 12:31:54,093 - INFO - Processing game 10/15
+2025-06-16 12:31:54,094 - INFO - Validating: https://www.baseball-reference.com/boxes/BOS/BOS202505170.shtml
+2025-06-16 12:31:59,385 - INFO - Processing game 11/15
+2025-06-16 12:31:59,386 - INFO - Validating: https://www.baseball-reference.com/boxes/LAD/LAD202505170.shtml
+2025-06-16 12:32:01,739 - ERROR - Error validating https://www.baseball-reference.com/boxes/LAD/LAD202505170.shtml: No objects to concatenate
+2025-06-16 12:32:03,745 - INFO - Processing game 12/15
+2025-06-16 12:32:03,745 - INFO - Validating: https://www.baseball-reference.com/boxes/HOU/HOU202505170.shtml
+2025-06-16 12:32:05,932 - ERROR - Error validating https://www.baseball-reference.com/boxes/HOU/HOU202505170.shtml: No objects to concatenate
+2025-06-16 12:32:07,937 - INFO - Processing game 13/15
+2025-06-16 12:32:07,938 - INFO - Validating: https://www.baseball-reference.com/boxes/ATL/ATL202505170.shtml
+2025-06-16 12:32:10,219 - ERROR - Error validating https://www.baseball-reference.com/boxes/ATL/ATL202505170.shtml: No objects to concatenate
+2025-06-16 12:32:12,224 - INFO - Processing game 14/15
+2025-06-16 12:32:12,225 - INFO - Validating: https://www.baseball-reference.com/boxes/SF/SF202505170.shtml
+2025-06-16 12:32:14,613 - ERROR - Error validating https://www.baseball-reference.com/boxes/SF/SF202505170.shtml: No objects to concatenate
+2025-06-16 12:32:16,618 - INFO - Processing game 15/15
+2025-06-16 12:32:16,619 - INFO - Validating: https://www.baseball-reference.com/boxes/PHI/PHI202505170.shtml
+2025-06-16 12:32:24,253 - INFO - Detailed results saved to validation_results_20250616_123224.csv
