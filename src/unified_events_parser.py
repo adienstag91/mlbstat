@@ -28,9 +28,9 @@ class UnifiedEventsParser:
         
         # Parse official stats first to build name resolver
         official_batting = self._parse_official_batting(soup)
-        print(official_batting)
+        #print(official_batting)
         official_pitching = self._parse_official_pitching(soup)
-        print(official_pitching)
+        #print(official_pitching)
         
         # Parse unified events
         game_id = self._extract_game_id(game_url)
@@ -129,9 +129,8 @@ class UnifiedEventsParser:
         except Exception:
             return pd.DataFrame()
         
-        # Clean data
-        df = df[df['Inn'].notna() & df['Play Description'].notna() & 
-                df['Batter'].notna() & df['Pitcher'].notna()]
+        # Clean data - keep ALL events, not just plate appearances
+        df = df[df['Inn'].notna() & df['Play Description'].notna() & df['Pitcher'].notna()]
         df = df[~df['Batter'].str.contains("Top of the|Bottom of the", case=False, na=False)]
         
         events = []
@@ -193,7 +192,7 @@ class UnifiedEventsParser:
             outcome.update({'is_sacrifice_fly': True, 'is_out': True, 'outs_recorded': 1})
             return outcome
         
-        # Sacrifice hits (not at-bats, e.g. sac bunt)
+        # Sacrifice hits (not at-bats, e.g. sac bunts)
         if re.search(r'sacrifice bunt|sac bunt', desc):
             outcome.update({'is_sacrifice_hit': True, 'is_out': True, 'outs_recorded': 1})
             return outcome
@@ -206,6 +205,11 @@ class UnifiedEventsParser:
         # Hit by pitch (not at-bats)
         if re.search(r'^hit by pitch|^hbp\b', desc):
             outcome.update({'bases_reached': 1})
+            return outcome
+        
+        # Non-plate appearance events (caught stealing, pickoffs, etc.)
+        if re.search(r'caught stealing|pickoff|picked off|wild pitch|passed ball|balk', desc):
+            outcome.update({'is_plate_appearance': False})
             return outcome
         
         # At-bat outcomes
@@ -263,9 +267,17 @@ class UnifiedEventsParser:
             'is_strikeout': 'sum'
         }).reset_index()
         
-        # Add home runs
-        hr_agg = events[events['hit_type'] == 'home_run'].groupby('batter_id').size().reset_index(name='parsed_HR')
-        parsed = parsed.merge(hr_agg, on='batter_id', how='left').fillna(0)
+        # Add hit types (HR, 2B, 3B)
+        hit_types = ['home_run', 'double', 'triple']
+        for hit_type in hit_types:
+            hit_agg = events[events['hit_type'] == hit_type].groupby('batter_id').size().reset_index(name=f'parsed_{hit_type.upper().replace("_", "")}')
+            if hit_type == 'home_run':
+                hit_agg = hit_agg.rename(columns={'parsed_HR': 'parsed_HR'})
+            elif hit_type == 'double':
+                hit_agg = hit_agg.rename(columns={'parsed_2B': 'parsed_2B'})
+            elif hit_type == 'triple':
+                hit_agg = hit_agg.rename(columns={'parsed_3B': 'parsed_3B'})
+            parsed = parsed.merge(hit_agg, on='batter_id', how='left').fillna(0)
         
         # Rename for comparison
         parsed = parsed.rename(columns={
@@ -277,7 +289,7 @@ class UnifiedEventsParser:
             'is_strikeout': 'parsed_SO'
         })
         
-        return self._compare_stats(official, parsed, ['PA', 'AB', 'H', 'BB', 'SO', 'HR'], 'player_name')
+        return self._compare_stats(official, parsed, ['PA', 'AB', 'H', 'BB', 'SO', 'HR', '2B', '3B'], 'player_name')
     
     def _validate_pitching(self, official: pd.DataFrame, events: pd.DataFrame) -> Dict:
         """Validate pitching by aggregating events"""
@@ -304,10 +316,10 @@ class UnifiedEventsParser:
             'is_hit': 'parsed_H',
             'is_walk': 'parsed_BB',
             'is_strikeout': 'parsed_SO',
-            'pitch_count': 'parsed_PC'
+            'pitch_count': 'parsec_PC'
         })
         
-        return self._compare_stats(official, parsed, ['BF', 'H', 'BB', 'SO', 'HR','PC'], 'pitcher_name')
+        return self._compare_stats(official, parsed, ['BF', 'H', 'BB', 'SO', 'HR', 'PC'], 'pitcher_name')
     
     def _compare_stats(self, official: pd.DataFrame, parsed: pd.DataFrame, stats: List[str], name_col: str) -> Dict:
         """Compare official vs parsed stats"""
@@ -442,7 +454,7 @@ class UnifiedEventsParser:
 # Test function
 def test_unified_parser():
     """Test the unified parser"""
-    test_url = "https://www.baseball-reference.com/boxes/NYA/NYA202503270.shtml"
+    test_url = "https://www.baseball-reference.com/boxes/HOU/HOU202503290.shtml"
     
     parser = UnifiedEventsParser()
     results = parser.parse_game(test_url)
@@ -452,7 +464,7 @@ def test_unified_parser():
     print("📋 UNIFIED EVENTS SAMPLE:")
     if not events.empty:
         cols = ['batter_id', 'pitcher_id', 'inning', 'inning_half', 'description', 
-                'is_plate_appearance', 'is_at_bat', 'is_hit', 'hit_type', 'bases_reached', 'is_out', 'pitch_count']
+                'is_plate_appearance', 'is_at_bat', 'is_hit', 'hit_type', 'bases_reached', 'pitch_count']
         print(events[cols].head(10))
         print(f"\nTotal events: {len(events)}")
     
