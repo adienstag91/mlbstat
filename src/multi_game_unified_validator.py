@@ -12,9 +12,10 @@ from typing import Dict, List
 import time
 import traceback
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from unified_events_parser import UnifiedEventsParser
+from game_url_fetcher import GameURLFetcher
 
 @dataclass
 class MultiGameResults:
@@ -74,7 +75,7 @@ class MultiGameUnifiedValidator:
                     'game_id': result['game_id'],
                     'batting_accuracy': bat_acc,
                     'pitching_accuracy': pit_acc,
-                    'batting_players_total': len(result['official_batting']),
+                    'batting_players_total': len(result['official_batting'])-len(result['official_pitching']),
                     'pitching_players_total': len(result['official_pitching']),
                     'batting_players_compared': bat_val.get('players_compared', 0),
                     'pitching_players_compared': pit_val.get('players_compared', 0),
@@ -213,11 +214,11 @@ class MultiGameUnifiedValidator:
             print("   Game | Game ID      | Batting | Pitching | Events | Batters | Pitchers")
             print("   -----|--------------|---------|----------|--------|---------|----------")
             for game in results.game_results:
-                game_id = game.get('game_id', 'unknown')[:12]  # Truncate for display
+                game_id = game.get('game_id', 'unknown')
                 bat_ratio = f"{game.get('batting_players_compared', 0)}/{game.get('batting_players_total', 0)}"
                 pit_ratio = f"{game.get('pitching_players_compared', 0)}/{game.get('pitching_players_total', 0)}"
                 events = game.get('unified_events_count', 0)
-                print(f"   {game['game_number']:4d} | {game_id:12s} | {game['batting_accuracy']:6.1f}% | "
+                print(f"   {game['game_number']:4d} | {game_id:14s} | {game['batting_accuracy']:6.1f}% | "
                       f"{game['pitching_accuracy']:7.1f}% | {events:6d} | {bat_ratio:>7s} | {pit_ratio:>8s}")
         
         # Failure analysis
@@ -237,7 +238,7 @@ class MultiGameUnifiedValidator:
         
         print("=" * 70)
     
-    def save_detailed_results(self, results: MultiGameResults, test_type: str = "standard"):
+    def save_detailed_results(self, results: MultiGameResults):
         """Save detailed results to CSV with timestamp in subfolder"""
         
         # Create results directory if it doesn't exist
@@ -249,31 +250,29 @@ class MultiGameUnifiedValidator:
         
         if results.game_results:
             # Save detailed results
-            detailed_filename = f"{results_dir}/multi_game_{test_type}_{timestamp}.csv"
+            detailed_filename = f"{results_dir}/multi_game__{timestamp}.csv"
             results_df = pd.DataFrame(results.game_results)
+            numeric_columns = results_df.select_dtypes(include=[np.number]).columns
+            results_df[numeric_columns] = results_df[numeric_columns].round(2)
             results_df.to_csv(detailed_filename, index=False)
             print(f"\n💾 Detailed results saved to '{detailed_filename}'")
             
             # Save summary
             summary_data = {
                 'timestamp': [timestamp],
-                'test_type': [test_type],
                 'total_games': [results.total_games],
                 'successful_games': [results.successful_games],
                 'failed_games': [results.failed_games],
-                'avg_batting_accuracy': [results.avg_batting_accuracy],
-                'avg_pitching_accuracy': [results.avg_pitching_accuracy],
+                'avg_batting_accuracy': [round(results.avg_batting_accuracy, 2)],
+                'avg_pitching_accuracy': [round(results.avg_pitching_accuracy, 2)],
                 'perfect_batting_games': [sum(1 for score in results.batting_accuracy_scores if score == 100.0)] if results.batting_accuracy_scores else [0],
                 'perfect_pitching_games': [sum(1 for score in results.pitching_accuracy_scores if score == 100.0)] if results.pitching_accuracy_scores else [0],
-                'batting_min': [min(results.batting_accuracy_scores)] if results.batting_accuracy_scores else [0],
-                'batting_max': [max(results.batting_accuracy_scores)] if results.batting_accuracy_scores else [0],
-                'pitching_min': [min(results.pitching_accuracy_scores)] if results.pitching_accuracy_scores else [0],
-                'pitching_max': [max(results.pitching_accuracy_scores)] if results.pitching_accuracy_scores else [0],
+                'batting_min': [round(min(results.batting_accuracy_scores), 2)] if results.batting_accuracy_scores else [0],
+                'batting_max': [round(max(results.batting_accuracy_scores), 2)] if results.batting_accuracy_scores else [0],
+                'pitching_min': [round(min(results.pitching_accuracy_scores), 2)] if results.pitching_accuracy_scores else [0],
+                'pitching_max': [round(max(results.pitching_accuracy_scores), 2)] if results.pitching_accuracy_scores else [0],
             }
             summary_df = pd.DataFrame(summary_data)
-            summary_filename = f"{results_dir}/summary_{test_type}_{timestamp}.csv"
-            summary_df.to_csv(summary_filename, index=False)
-            print(f"📈 Summary saved to '{summary_filename}'")
             
             # Also append to a master log file for tracking progress over time
             master_log = f"{results_dir}/master_validation_log.csv"
@@ -288,64 +287,18 @@ class MultiGameUnifiedValidator:
                 summary_df.to_csv(master_log, index=False)
                 print(f"📝 Master log created: '{master_log}'")
             
-            return detailed_filename, summary_filename
+            return detailed_filename
         
         return None, None
 
-# TEST GAME URLS - Mix of different teams, dates, and scenarios
-def get_test_game_urls() -> List[str]:
-    """Get a diverse set of test game URLs for validation"""
-    
-    test_urls = [
-        "https://www.baseball-reference.com/boxes/NYA/NYA202503270.shtml",  # Yankees vs Brewers
-        "https://www.baseball-reference.com/boxes/LAN/LAN202503280.shtml",  # Dodgers
-        "https://www.baseball-reference.com/boxes/HOU/HOU202503290.shtml",  # Astros
-        "https://www.baseball-reference.com/boxes/SFN/SFN202503300.shtml",  # Giants
-        "https://www.baseball-reference.com/boxes/SDN/SDN202503310.shtml",  # Padres
-        "https://www.baseball-reference.com/boxes/BOS/BOS202504010.shtml",  # Red Sox
-        "https://www.baseball-reference.com/boxes/ATL/ATL202504020.shtml",  # Braves
-        "https://www.baseball-reference.com/boxes/CHN/CHN202504030.shtml",  # Cubs
-        "https://www.baseball-reference.com/boxes/DET/DET202504040.shtml",  # Tigers
-        "https://www.baseball-reference.com/boxes/TEX/TEX202504050.shtml",  # Rangers
-    ]
-    
-    return test_urls
-
-def get_extended_test_urls() -> List[str]:
-    """Get an extended set of test URLs for comprehensive validation"""
-    
-    # Start with basic test URLs
-    urls = get_test_game_urls()
-    
-    # Add more diverse scenarios
-    extended_urls = [
-        "https://www.baseball-reference.com/boxes/MIA/MIA202504060.shtml",  # Marlins
-        "https://www.baseball-reference.com/boxes/COL/COL202504070.shtml",  # Rockies
-        "https://www.baseball-reference.com/boxes/SEA/SEA202504080.shtml",  # Mariners
-        "https://www.baseball-reference.com/boxes/MIN/MIN202504090.shtml",  # Twins
-        "https://www.baseball-reference.com/boxes/TBA/TBA202504100.shtml",  # Rays
-    ]
-    
-    return urls + extended_urls
-
-def run_batch_validation(extended: bool = False, max_failures: int = 3) -> MultiGameResults:
+def run_batch_validation(url_list: List[str], max_failures: int = 3) -> MultiGameResults:
     """Run batch validation on multiple games"""
     
     print("🚀 STARTING BATCH UNIFIED VALIDATION")
     print("=" * 50)
     
-    # Get test URLs and determine test type
-    if extended:
-        test_urls = get_extended_test_urls()
-        test_type = "extended"
-        print("📋 Running EXTENDED validation (15 games)")
-    else:
-        test_urls = get_test_game_urls()
-        test_type = "standard"
-        print("📋 Running STANDARD validation (10 games)")
-    
     print(f"📋 Test games selected:")
-    for i, url in enumerate(test_urls, 1):
+    for i, url in enumerate(url_list, 1):
         game_id = url.split('/')[-1].replace('.shtml', '')
         print(f"   {i:2d}. {game_id}")
     
@@ -353,59 +306,204 @@ def run_batch_validation(extended: bool = False, max_failures: int = 3) -> Multi
     
     # Create validator and run test
     validator = MultiGameUnifiedValidator()
-    results = validator.validate_multiple_games(test_urls, max_failures=max_failures)
+    results = validator.validate_multiple_games(url_list, max_failures=max_failures)
     
     # Save results with dynamic filenames
-    validator.save_detailed_results(results, test_type)
+    validator.save_detailed_results(results)
     
     return results
 
-def run_quick_test() -> MultiGameResults:
-    """Run a quick test on just a few games"""
-    print("🚀 QUICK TEST - 3 GAMES")
-    print("=" * 30)
+def run_full_season_validation(start_date: str = "2025-03-27", 
+                             end_date: str = None, 
+                             max_failures: int = 20) -> MultiGameResults:
+    """
+    Validate the entire 2025 regular season by cycling through each date.
     
-    quick_urls = [
-        "https://www.baseball-reference.com/boxes/NYA/NYA202503270.shtml",
-        "https://www.baseball-reference.com/boxes/LAN/LAN202503280.shtml", 
-        "https://www.baseball-reference.com/boxes/HOU/HOU202503290.shtml",
-    ]
+    Args:
+        start_date: Start of regular season (default: 2025-04-01 to skip spring training)
+        end_date: End date (default: yesterday to avoid incomplete games)
+        max_failures: Max failures before stopping entire validation
+        
+    Returns:
+        MultiGameResults object with comprehensive season stats
+    """
     
-    validator = MultiGameUnifiedValidator()
-    results = validator.validate_multiple_games(quick_urls, max_failures=1)
-    
-    validator.save_detailed_results(results, "quick")
-    return results
-
-def run_custom_test(game_urls: List[str], test_name: str = "custom") -> MultiGameResults:
-    """Run a custom test with specific game URLs"""
-    print(f"🚀 CUSTOM TEST - {test_name.upper()}")
+    print("🏆 2025 MLB SEASON VALIDATION")
     print("=" * 50)
     
-    print(f"📋 {len(game_urls)} games selected:")
-    for i, url in enumerate(game_urls, 1):
-        game_id = url.split('/')[-1].replace('.shtml', '')
-        print(f"   {i:2d}. {game_id}")
+    # Set end date to yesterday if not specified (avoid incomplete games)
+    if end_date is None:
+        end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     
-    print()
+    print(f"📅 Date range: {start_date} to {end_date}")
+    print(f"🚫 Excluding spring training games")
     
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+    total_days = (end_dt - start_dt).days + 1
+    
+    # Collect all game URLs by cycling through dates
+    fetcher = GameURLFetcher()
+    all_game_urls = []
+    failed_dates = []
+    
+    print(f"\n📊 Scanning {total_days} days for completed games...")
+    
+    current_date = start_dt
+    day_count = 0
+    
+    while current_date <= end_dt:
+        date_str = current_date.strftime('%Y-%m-%d')
+        day_count += 1
+        
+        try:
+            print(f"  Day {day_count:3d}/{total_days}: {date_str}...", end=" ")
+            
+            # Use existing fetcher to get games for this date
+            games = fetcher.get_games_by_date(date_str, completed_only=True)
+            
+            if games:
+                all_game_urls.extend(games)
+                print(f"✅ {len(games)} games")
+            else:
+                print("📭 No games")
+            
+            # Be respectful with requests
+            time.sleep(1)
+            
+        except Exception as e:
+            print(f"❌ Error: {str(e)[:50]}...")
+            failed_dates.append(date_str)
+        
+        current_date += timedelta(days=1)
+    
+    # Summary of collection phase
+    print(f"\n📋 GAME COLLECTION COMPLETE:")
+    print(f"   Total games found: {len(all_game_urls)}")
+    print(f"   Failed dates: {len(failed_dates)}")
+    if failed_dates:
+        print(f"   Failed dates: {', '.join(failed_dates[:5])}{'...' if len(failed_dates) > 5 else ''}")
+    
+    # Remove any potential duplicates (shouldn't happen with date-based, but safety first)
+    unique_games = list(dict.fromkeys(all_game_urls))
+    duplicates_removed = len(all_game_urls) - len(unique_games)
+    
+    if duplicates_removed > 0:
+        print(f"   🔄 Removed {duplicates_removed} duplicate games")
+        all_game_urls = unique_games
+    
+    # Now run the existing validation using all your existing functions
+    print(f"\n🎯 STARTING SEASON VALIDATION OF {len(all_game_urls)} GAMES")
+    print("=" * 60)
+    
+    # Use existing validator infrastructure
     validator = MultiGameUnifiedValidator()
-    results = validator.validate_multiple_games(game_urls, max_failures=2)
+    results = validator.validate_multiple_games(all_game_urls, max_failures=max_failures)
     
-    validator.save_detailed_results(results, test_name)
+    # Use existing save function but with season-specific filename
+    season_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Save detailed results using existing infrastructure
+    validator.save_detailed_results(results)
+    
+    # Create additional season-specific summary
+    _create_season_summary_file(results, start_date, end_date, len(all_game_urls), failed_dates)
+    
     return results
+
+def _create_season_summary_file(results: MultiGameResults, start_date: str, end_date: str, 
+                               total_games: int, failed_dates: list):
+    """Create a season-specific summary file"""
+    
+    import os
+    
+    # Create results directory if it doesn't exist
+    results_dir = "validation_results"
+    os.makedirs(results_dir, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    summary_file = f"{results_dir}/season_summary_{timestamp}.txt"
+    
+    with open(summary_file, 'w') as f:
+        f.write("🏆 2025 MLB REGULAR SEASON VALIDATION SUMMARY\n")
+        f.write("=" * 55 + "\n\n")
+        
+        f.write(f"📅 Season Date Range: {start_date} to {end_date}\n")
+        f.write(f"⏱️  Validation Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"🎮 Total Games Found: {total_games}\n")
+        f.write(f"✅ Successfully Validated: {results.successful_games}\n")
+        f.write(f"❌ Failed Games: {results.failed_games}\n")
+        f.write(f"📊 Overall Success Rate: {results.successful_games/(results.successful_games + results.failed_games)*100:.1f}%\n\n")
+        
+        f.write("⚾ BATTING ACCURACY:\n")
+        f.write(f"   Average: {results.avg_batting_accuracy:.2f}%\n")
+        f.write(f"   Best: {max(results.batting_accuracy_scores):.1f}%\n")
+        f.write(f"   Worst: {min(results.batting_accuracy_scores):.1f}%\n")
+        f.write(f"   Perfect Games (100%): {sum(1 for x in results.batting_accuracy_scores if x == 100.0)}/{len(results.batting_accuracy_scores)}\n\n")
+        
+        f.write("🥎 PITCHING ACCURACY:\n")
+        f.write(f"   Average: {results.avg_pitching_accuracy:.2f}%\n")
+        f.write(f"   Best: {max(results.pitching_accuracy_scores):.1f}%\n")
+        f.write(f"   Worst: {min(results.pitching_accuracy_scores):.1f}%\n")
+        f.write(f"   Perfect Games (100%): {sum(1 for x in results.pitching_accuracy_scores if x == 100.0)}/{len(results.pitching_accuracy_scores)}\n\n")
+        
+        # Overall assessment
+        f.write("🎯 SEASON ASSESSMENT:\n")
+        if results.avg_batting_accuracy >= 99 and results.avg_pitching_accuracy >= 95:
+            f.write("   🎉 EXCELLENT! Parser is production-ready for 2025 season\n")
+        elif results.avg_batting_accuracy >= 95 and results.avg_pitching_accuracy >= 90:
+            f.write("   ✅ GOOD! Minor refinements needed\n")
+        else:
+            f.write("   🔧 NEEDS WORK! Significant improvements required\n")
+        
+        if failed_dates:
+            f.write(f"\n📅 Failed Date Collection ({len(failed_dates)} dates):\n")
+            for date in failed_dates:
+                f.write(f"   {date}\n")
+    
+    print(f"\n📝 Season summary saved to: {summary_file}")
+
+# Usage example to add to the bottom of multi_game_unified_validator.py
+def example_usage():
+    """
+    Example of how to use the full season validator.
+    Add this to the __main__ section of multi_game_unified_validator.py
+    """
+    
+    # Run full season validation
+    season_results = run_full_season_validation(
+        start_date="2025-03-27",  # Regular season start (no spring training)
+        max_failures=20           # Stop after 20 failures
+    )
+    
+    print(f"\n🏆 2025 SEASON VALIDATION COMPLETE!")
+    print(f"📊 Final Results:")
+    print(f"   Batting: {season_results.avg_batting_accuracy:.1f}%")
+    print(f"   Pitching: {season_results.avg_pitching_accuracy:.1f}%")
+    print(f"   Games: {season_results.successful_games} successful, {season_results.failed_games} failed")
+
 
 if __name__ == "__main__":
     # Default: run standard validation
     # Uncomment different lines to run different tests:
     
     # Standard test (10 games)
-    results = run_batch_validation(extended=False, max_failures=3)
+    #results = run_batch_validation(extended=False, max_failures=3)
     
     # Extended test (15 games) 
     # results = run_batch_validation(extended=True, max_failures=5)
     
     # Quick test (3 games)
     # results = run_quick_test()
+    #fetcher = GameURLFetcher()
+    #url_list = fetcher.get_games_by_team("LAD")
+    #results = run_batch_validation(url_list)
+    #print(f"\n🎯 Final Results: {results.avg_batting_accuracy:.2f}% batting, {results.avg_pitching_accuracy:.2f}% pitching")
+
+
+    # Run full season validation:
+    season_results = run_full_season_validation(start_date="2025-03-27", max_failures=20)
     
-    print(f"\n🎯 Final Results: {results.avg_batting_accuracy:.1f}% batting, {results.avg_pitching_accuracy:.1f}% pitching")
+    print(f"\n🏆 2025 SEASON COMPLETE!")
+    print(f"Batting: {season_results.avg_batting_accuracy:.2f}%, Pitching: {season_results.avg_pitching_accuracy:.2f}%")
+

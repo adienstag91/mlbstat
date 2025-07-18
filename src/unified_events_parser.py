@@ -11,9 +11,12 @@ import re
 import unicodedata
 from bs4 import BeautifulSoup
 from io import StringIO
-from single_game_validator import SafePageFetcher
 from typing import Dict, List, Optional
 import uuid
+import time
+from playwright.sync_api import sync_playwright
+from mlb_cached_fetcher import SafePageFetcher
+
 
 class UnifiedEventsParser:
     """Parse play-by-play into unified events with both batter and pitcher info"""
@@ -138,8 +141,15 @@ class UnifiedEventsParser:
             event = self._parse_single_event(row, game_id)
             if event:
                 events.append(event)
-        
-        return pd.DataFrame(events)
+
+        # Convert to DataFrame FIRST
+        events_df = pd.DataFrame(events)
+
+        # THEN apply the pitch count fix
+        if not events_df.empty:
+            events_df = self._fix_pitch_count_duplicates(events_df)
+
+        return events_df
     
     def _parse_single_event(self, row: pd.Series, game_id: str) -> Optional[Dict]:
         """Parse a single play-by-play row"""
@@ -193,7 +203,7 @@ class UnifiedEventsParser:
             return outcome
         
         # Sacrifice hits (not at-bats, e.g. sac bunts)
-        if re.search(r'sacrifice bunt|sac bunt', desc):
+        if re.search(r'sacrifice bunt|sac bunt|bunt.*sacrifice', desc):
             outcome.update({'is_sacrifice_hit': True, 'is_out': True, 'outs_recorded': 1})
             return outcome
         
@@ -206,28 +216,70 @@ class UnifiedEventsParser:
         if re.search(r'^hit by pitch|^hbp\b', desc):
             outcome.update({'bases_reached': 1})
             return outcome
-        
+
+        # SPECIAL CASE: Strikeout with wild pitch/passed ball - still counts as strikeout
+        if re.search(r'strikeout.*wild pitch|strikeout.*passed ball|wild pitch.*strikeout|passed ball.*strikeout', desc):
+            outcome.update({
+                'is_at_bat': True,
+                'is_strikeout': True,
+                'is_out': False,  # Batter reaches on wild pitch
+                'outs_recorded': 0, 'bases_reached': 1})
+            return outcome
+         # SPECIAL CASE: Double play with strikeout and baserunning out - extract the strikeout part
+        elif re.search(r'double play.*strikeout|strikeout.*double play', desc):
+            outcome.update({'is_at_bat': True, 'is_strikeout': True, 'is_out': True, 'outs_recorded': 2})
+            return outcome
         # Non-plate appearance events (caught stealing, pickoffs, etc.)
-        if re.search(r'caught stealing|pickoff|picked off|wild pitch|passed ball|balk', desc):
+        elif re.search(r'caught stealing|pickoff|picked off|wild pitch|passed ball|balk', desc):
             outcome.update({'is_plate_appearance': False})
             return outcome
         
         # At-bat outcomes
         outcome['is_at_bat'] = True
+
+        # Reached on error (at-bat, not hit, batter reaches base)
+        if re.search(r'reached.*error|reached.*e\d+', desc):
+            outcome.update({'is_out': False, 'bases_reached': 1})
+            return outcome
+
+        # Reached on catcher's interference
+        if re.search(r'reached.*interference', desc):
+            outcome.update({'is_out': False, 'is_at_bat': False, 'bases_reached': 1})
+            return outcome
         
+        # Outs
         # Strikeouts
         if re.search(r'^strikeout\b|^struck out', desc):
             outcome.update({'is_strikeout': True, 'is_out': True, 'outs_recorded': 1})
             return outcome
+
+        if re.search(r'grounded into double play|gdp\b|double play', desc):
+            outcome.update({'is_out': True, 'outs_recorded': 2})
+            return outcome
+
+        # Batter's interference
+        if re.search(r'interference by batter', desc):
+            outcome.update({'is_out': True, 'outs_recorded': 1})
+            return outcome
         
+        out_patterns = [
+            r'grounded out\b', r'flied out\b', r'lined out\b', r'popped out\b',
+            r'groundout\b', r'flyout\b', r'lineout\b', r'popout\b', r'popfly\b', r'flyball\b', r"fielder's choice\b"
+        ]
+        
+        for pattern in out_patterns:
+            if re.search(pattern, desc):
+                outcome.update({'is_out': True, 'outs_recorded': 1})
+                return outcome
+
         # Hits
-        if re.search(r'^home run\b|^hr\b', desc):
+        if re.search(r'home run\b|^hr\b', desc):
             outcome.update({'is_hit': True, 'hit_type': 'home_run', 'bases_reached': 4})
             return outcome
         
         hit_patterns = [
             (r'^single\b.*(?:to|up|through)', 'single', 1),
-            (r'^double\b.*(?:to|down)', 'double', 2),
+            (r'double\b.*(?:to|down)', 'double', 2),
             (r'^triple\b.*(?:to|down)', 'triple', 3)
         ]
         
@@ -235,28 +287,51 @@ class UnifiedEventsParser:
             if re.search(pattern, desc):
                 outcome.update({'is_hit': True, 'hit_type': hit_type, 'bases_reached': bases})
                 return outcome
-        
-        # Outs
-        if re.search(r'grounded into double play|gdp\b|double play', desc):
-            outcome.update({'is_out': True, 'outs_recorded': 2})
-            return outcome
-        
-        out_patterns = [
-            r'^grounded out\b', r'^flied out\b', r'^lined out\b', r'^popped out\b',
-            r'^groundout\b', r'^flyout\b', r'^lineout\b', r'^popout\b', r'^popfly\b', r'^flyball\b'
-        ]
-        
-        for pattern in out_patterns:
-            if re.search(pattern, desc):
-                outcome.update({'is_out': True, 'outs_recorded': 1})
-                return outcome
-        
+                
         return None
+
+    def _fix_pitch_count_duplicates(self, events: pd.DataFrame) -> pd.DataFrame:
+        """Fix pitch count double-counting in non-PA events"""
+        if events.empty:
+            return events
+        
+        events = events.sort_values(['inning', 'inning_half']).reset_index(drop=True)
+        
+        for (inning, half), group in events.groupby(['inning', 'inning_half']):
+            indices = group.index.tolist()
+            
+            for i, idx in enumerate(indices):
+                event = events.loc[idx]
+                
+                if event['is_plate_appearance'] or event['pitch_count'] == 0:
+                    continue
+                
+                # Check if next event is a PA with same batter/pitcher
+                is_last_event = (i == len(indices) - 1)
+                has_followup_pa = False
+                
+                if not is_last_event:
+                    next_event = events.loc[indices[i + 1]]
+                    if (next_event['is_plate_appearance'] and 
+                        next_event['batter_id'] == event['batter_id'] and
+                        next_event['pitcher_id'] == event['pitcher_id']):
+                        has_followup_pa = True
+                
+                # Zero out pitch count if there's a follow-up PA
+                if has_followup_pa:
+                    events.loc[idx, 'pitch_count'] = 0
+        
+        return events
     
     def _validate_batting(self, official: pd.DataFrame, events: pd.DataFrame) -> Dict:
         """Validate batting by aggregating events"""
         if official.empty or events.empty:
             return {'accuracy': 0, 'players_compared': 0}
+
+        #Filter to only players with meaningful baseball activity
+        meaningful_columns = ['PA', 'AB', 'H', 'BB', 'SO', 'HR', '2B', '3B', 'SB', 'CS', 'HBP', 'GDP', 'SF', 'SH']
+        meaningful_stats = official[meaningful_columns].sum(axis=1) > 0
+        official = official[meaningful_stats]
         
         # Aggregate events by batter
         parsed = events.groupby('batter_id').agg({
@@ -316,7 +391,7 @@ class UnifiedEventsParser:
             'is_hit': 'parsed_H',
             'is_walk': 'parsed_BB',
             'is_strikeout': 'parsed_SO',
-            'pitch_count': 'parsec_PC'
+            'pitch_count': 'parsed_PC'
         })
         
         return self._compare_stats(official, parsed, ['BF', 'H', 'BB', 'SO', 'HR', 'PC'], 'pitcher_name')
@@ -394,6 +469,7 @@ class UnifiedEventsParser:
                 if len(parts) >= 2:
                     abbrev = f"{parts[0][0]}. {' '.join(parts[1:])}"
                     mappings[abbrev] = name
+
         return mappings
     
     def _normalize_name(self, name: str) -> str:
@@ -407,13 +483,29 @@ class UnifiedEventsParser:
         
         # Remove trailing codes and results
         cleaned = re.sub(r',\s*[WLSHB]+\s*\([^)]*\)$', '', cleaned)
+        
+        # ✅ FIX: Handle name suffixes BEFORE removing position codes
+        suffix_match = re.search(r'\s+(II|III|IV|Jr\.?|Sr\.?)\s*([A-Z]{1,3})*$', cleaned)
+        
+        preserved_suffix = ""
+        if suffix_match:
+            preserved_suffix = suffix_match.group(1)
+            # Remove suffix temporarily for position code removal
+            cleaned = cleaned[:suffix_match.start()] + ' ' + (suffix_match.group(2) or '')
+            cleaned = cleaned.strip()
+        
+        # Remove position codes (now suffix is safe)
         cleaned = re.sub(r"((?:[A-Z0-9]{1,3})(?:-[A-Z0-9]{1,3})*)$", "", cleaned).strip()
+        
+        # Add back the preserved suffix
+        if preserved_suffix:
+            cleaned = f"{cleaned} {preserved_suffix}"
         
         return cleaned
     
     def _extract_game_id(self, url: str) -> str:
         """Extract game ID from URL"""
-        match = re.search(r'/boxes/[A-Z]{3}/([A-Z]{3}\d{8})', url)
+        match = re.search(r'/boxes/[A-Z]{3}/([A-Z]{3}\d{8,9})', url)
         return match.group(1) if match else 'unknown'
     
     def _parse_inning(self, inn_str: str) -> int:
@@ -454,19 +546,28 @@ class UnifiedEventsParser:
 # Test function
 def test_unified_parser():
     """Test the unified parser"""
-    test_url = "https://www.baseball-reference.com/boxes/HOU/HOU202503290.shtml"
+    test_url = "https://www.baseball-reference.com/boxes/ATL/ATL202505050.shtml"
     
     parser = UnifiedEventsParser()
     results = parser.parse_game(test_url)
     
     events = results['unified_events']
+    batting_box = results['official_batting']
+    pitching_box = results['official_pitching']
     
     print("📋 UNIFIED EVENTS SAMPLE:")
     if not events.empty:
         cols = ['batter_id', 'pitcher_id', 'inning', 'inning_half', 'description', 
                 'is_plate_appearance', 'is_at_bat', 'is_hit', 'hit_type', 'bases_reached', 'pitch_count']
-        print(events[cols].head(10))
+        #print(events[cols].head(10))
+        print(events[cols])
         print(f"\nTotal events: {len(events)}")
+
+    print("Batting Box score:")
+    print(batting_box)
+
+    print("Pitching Box score:")
+    print(pitching_box)
     
     bat_val = results['batting_validation']
     pit_val = results['pitching_validation']
