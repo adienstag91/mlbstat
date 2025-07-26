@@ -27,8 +27,9 @@ class MultiGameResults:
     pitching_accuracy_scores: List[float]
     avg_batting_accuracy: float
     avg_pitching_accuracy: float
-    game_results: List[Dict]
-    failure_details: List[Dict]
+
+game_results: List[Dict]
+failure_details: List[Dict]
 
 class MultiGameUnifiedValidator:
     """Validate unified events parser accuracy across multiple games"""
@@ -75,7 +76,7 @@ class MultiGameUnifiedValidator:
                     'game_id': result['game_id'],
                     'batting_accuracy': bat_acc,
                     'pitching_accuracy': pit_acc,
-                    'batting_players_total': len(result['official_batting'])-len(result['official_pitching']),
+                    'batting_players_total': self.unified_parser.calculate_meaningful_batters(result['official_batting']),
                     'pitching_players_total': len(result['official_pitching']),
                     'batting_players_compared': bat_val.get('players_compared', 0),
                     'pitching_players_compared': pit_val.get('players_compared', 0),
@@ -137,35 +138,72 @@ class MultiGameUnifiedValidator:
         return results
     
     def _display_game_result(self, game_result: Dict, batting_results: Dict, pitching_results: Dict):
-        """Display results for a single game"""
+        """Display results for a single game - ENHANCED with smart player categorization"""
         
         # Show main results
         print(f"   ✅ Batting: {game_result['batting_accuracy']:.1f}% ({game_result['batting_diffs']} diffs/{game_result['batting_stats_total']} stats)")
         print(f"   ✅ Pitching: {game_result['pitching_accuracy']:.1f}% ({game_result['pitching_diffs']} diffs/{game_result['pitching_stats_total']} stats)")
-        print(f"   📊 {game_result['batting_players_compared']}/{game_result['batting_players_total']} batters, {game_result['pitching_players_compared']}/{game_result['pitching_players_total']} pitchers")
+        
+        # Calculate and display player participation info
+        batting_total = game_result['batting_players_total']
+        batting_compared = game_result['batting_players_compared']
+        
+        print(f"   📊 {batting_compared}/{batting_total} batters, {game_result['pitching_players_compared']}/{game_result['pitching_players_total']} pitchers")
         print(f"   📊 {game_result['unified_events_count']} unified events parsed")
         
-        # Show differences if any (but keep them brief for multi-game output)
+        # ✅ NEW: Show smart categorization
+        batting_mismatches = batting_results.get('name_mismatches', {})
+        pitching_mismatches = pitching_results.get('name_mismatches', {})
+        
+        # Show batting player analysis
+        batting_categories = batting_mismatches.get('player_categories', {})
+        
+        pinch_runners = batting_categories.get('pinch_runners', [])
+        name_mismatches = batting_categories.get('name_mismatches', [])
+        empty_stats = batting_categories.get('empty_stats', [])
+        
+        if pinch_runners:
+            print(f"   👟 Pinch runners: {len(pinch_runners)} (PA=0, baserunning only)")
+            for pr in pinch_runners[:2]:  # Show first 2
+                stats_str = ", ".join([f"{k}={v}" for k, v in pr['stats'].items()])
+                print(f"      • {pr['name']} ({stats_str})")
+            if len(pinch_runners) > 2:
+                print(f"      • ... and {len(pinch_runners) - 2} more")
+        
+        if name_mismatches:
+            print(f"   ⚠️  TRUE name mismatches: {len(name_mismatches)} players with PA/AB > 0")
+            for nm in name_mismatches[:2]:  # Show first 2
+                print(f"      🚨 '{nm['name']}' (PA={nm['pa']}, AB={nm['ab']})")
+            if len(name_mismatches) > 2:
+                print(f"      🚨 ... and {len(name_mismatches) - 2} more")
+        
+        if empty_stats:
+            print(f"   📝 Filtered players: {len(empty_stats)} (all stats = 0)")
+        
+        # Show pitching mismatches (simpler since pitchers rarely have this issue)
+        pitching_unmatched = pitching_mismatches.get('unmatched_official_names', [])
+        if pitching_unmatched:
+            print(f"   ⚠️  Pitching name mismatches: {len(pitching_unmatched)}")
+            for name in pitching_unmatched[:2]:
+                print(f"      📝 '{name}'")
+        
+        # Show actual stat differences (these are the real issues)
         batting_differences = batting_results.get('differences', [])
         pitching_differences = pitching_results.get('differences', [])
         
         if batting_differences:
-            print(f"   ⚠️  Batting differences: {len(batting_differences)} players")
-            # Only show first difference for brevity
-            if batting_differences:
-                first_diff = batting_differences[0]
-                print(f"      {first_diff['player']}: {first_diff['diffs'][0]}")
-                if len(batting_differences) > 1:
-                    print(f"      ... and {len(batting_differences) - 1} more")
+            print(f"   🚨 BATTING STAT DIFFERENCES: {len(batting_differences)} players")
+            first_diff = batting_differences[0]
+            print(f"      {first_diff['player']}: {first_diff['diffs'][0]}")
+            if len(batting_differences) > 1:
+                print(f"      ... and {len(batting_differences) - 1} more")
         
         if pitching_differences:
-            print(f"   ⚠️  Pitching differences: {len(pitching_differences)} pitchers")
-            # Only show first difference for brevity
-            if pitching_differences:
-                first_diff = pitching_differences[0]
-                print(f"      {first_diff['player']}: {first_diff['diffs'][0]}")
-                if len(pitching_differences) > 1:
-                    print(f"      ... and {len(pitching_differences) - 1} more")
+            print(f"   🚨 PITCHING STAT DIFFERENCES: {len(pitching_differences)} pitchers")
+            first_diff = pitching_differences[0]
+            print(f"      {first_diff['player']}: {first_diff['diffs'][0]}")
+            if len(pitching_differences) > 1:
+                print(f"      ... and {len(pitching_differences) - 1} more")
     
     def _print_summary(self, results: MultiGameResults):
         """Print comprehensive summary of multi-game results"""
@@ -496,7 +534,7 @@ if __name__ == "__main__":
     # Quick test (3 games)
     # results = run_quick_test()
     #fetcher = GameURLFetcher()
-    #url_list = fetcher.get_games_by_team("LAD")
+    #url_list = fetcher.get_games_by_team("NYY")
     #results = run_batch_validation(url_list)
     #print(f"\n🎯 Final Results: {results.avg_batting_accuracy:.2f}% batting, {results.avg_pitching_accuracy:.2f}% pitching")
 
@@ -506,4 +544,3 @@ if __name__ == "__main__":
     
     print(f"\n🏆 2025 SEASON COMPLETE!")
     print(f"Batting: {season_results.avg_batting_accuracy:.2f}%, Pitching: {season_results.avg_pitching_accuracy:.2f}%")
-

@@ -1,2 +1,0 @@
-timestamp,test_type,total_games,successful_games,failed_games,avg_batting_accuracy,avg_pitching_accuracy,perfect_batting_games,perfect_pitching_games,batting_min,batting_max,pitching_min,pitching_max
-20250707_122214,standard,10,10,0,58.23663940037568,58.610074118800426,1,2,0,100.0,0,100.0

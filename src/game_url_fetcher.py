@@ -38,6 +38,7 @@ class GameURLFetcher:
         try:
             year, month, day = date.split('-')
             url = f"{self.base_url}/boxes/index.fcgi?year={year}&month={int(month)}&day={int(day)}"
+            print(url)
             url_date = year + month + day
 
             soup = SafePageFetcher.fetch_page(url)
@@ -173,10 +174,10 @@ if __name__ == "__main__":
     print("=" * 40)
     
     # Test 1: Get games by date
-    print("📅 Test 1: Games on 2025-03-27")
-    games_by_date = fetcher.get_games_by_date("2025-03-27")
+    print("📅 Test 1: Games on 2025-03-18")
+    games_by_date = fetcher.get_games_by_date("2025-03-18")
     print(f"Found {len(games_by_date)} games")
-    for i, url in enumerate(games_by_date[:3], 1):  # Show first 3
+    for i, url in enumerate(games_by_date, 1):  
         print(f"   {i}. {url}")
     
     # Test 2: Get Yankees last 5 games
