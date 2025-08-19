@@ -1,0 +1,14 @@
+MLB Batch Processing Summary - 20250817_221222
+==================================================
+
+Games Processed: 6
+Successful: 6
+Failed: 0
+Success Rate: 100.0%
+
+Batting Accuracy: 100.00%
+Pitching Accuracy: 100.00%
+Overall Accuracy: 100.00%
+
+Games with Batting Data: 6
+Games with Pitching Data: 6

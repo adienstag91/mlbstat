@@ -81,31 +81,7 @@ CREATE TABLE at_bats (
 );
 """)
 
-cursor.execute("""
-CREATE TABLE pitches (
-    pitch_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    at_bat_id INTEGER NOT NULL,
-    pitch_type TEXT,
-    speed REAL,
-    result TEXT,
-    FOREIGN KEY (at_bat_id) REFERENCES at_bats(at_bat_id)
-);
-""")
 
-cursor.execute("""
-CREATE TABLE runners (
-    runner_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    runner_name TEXT,
-    event_type TEXT, -- e.g., SB, CS, R
-    description TEXT,
-    play_ab_id TEXT, -- the AB during which this was observed
-    source_ab_id TEXT, -- optional: the AB where the runner reached base
-    game_id TEXT,
-    inning_id TEXT,
-    batter_id TEXT,
-    pitcher_id TEXT
-);
-""")
 
 # Commit and close
 conn.commit()

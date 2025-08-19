@@ -1,6 +1,0 @@
-game_number,game_url,batting_accuracy,pitching_accuracy,batting_players_total,pitching_players_total,batting_players_compared,pitching_players_compared,batting_events,pitching_events,batting_diffs,pitching_diffs,batting_stats_total,pitching_stats_total,status
-1,https://www.baseball-reference.com/boxes/NYA/NYA202503270.shtml,100.0,100.0,31,10,21,10,72,72,0,0,107,120,success
-2,https://www.baseball-reference.com/boxes/LAN/LAN202503280.shtml,98.4,98.55072463768117,33,11,22,11,81,81,2,2,125,138,success
-3,https://www.baseball-reference.com/boxes/HOU/HOU202503290.shtml,97.61904761904762,97.84946236559139,30,7,19,7,62,62,2,2,84,93,success
-4,https://www.baseball-reference.com/boxes/SFN/SFN202503300.shtml,0.0,0.0,0,0,0,0,0,0,0,0,0,0,success
-5,https://www.baseball-reference.com/boxes/SDN/SDN202503310.shtml,98.07692307692307,98.24561403508771,27,8,19,8,74,74,2,2,104,114,success

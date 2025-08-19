@@ -10,11 +10,12 @@ import json
 import time
 import os
 import hashlib
+import sys
 from typing import Optional
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 
-class CachedSafePageFetcher:
+class SafePageFetcher:
     """Enhanced SafePageFetcher with intelligent caching"""
     
     CACHE_FILE = "mlb_cache.json"
@@ -267,15 +268,6 @@ class CachedSafePageFetcher:
         else:
             print("✅ No expired cache entries found")
 
-# Convenience class to maintain backward compatibility
-class SafePageFetcher:
-    """Backward compatible wrapper for the cached fetcher"""
-    
-    @staticmethod
-    def fetch_page(url: str, max_retries: int = 3) -> BeautifulSoup:
-        """Safely fetch page with caching (backward compatible)"""
-        return CachedSafePageFetcher.fetch_page(url, max_retries)
-
 # Testing and utility functions
 def test_caching_system():
     """Test the caching system with sample MLB URLs"""
@@ -288,7 +280,7 @@ def test_caching_system():
         "https://www.baseball-reference.com/teams/NYY/2025-schedule-scores.shtml",  # Schedule
     ]
     
-    fetcher = CachedSafePageFetcher()
+    fetcher = SafePageFetcher()
     
     for i, url in enumerate(test_urls, 1):
         print(f"\n{i}. Testing {url}")
@@ -313,4 +305,8 @@ def test_caching_system():
     fetcher.print_cache_summary()
 
 if __name__ == "__main__":
-    test_caching_system()
+    fetcher = SafePageFetcher()
+    if len(sys.argv) > 1 and sys.argv[1] == "clear":
+        fetcher.clear_cache()
+    else:
+        test_caching_system()
