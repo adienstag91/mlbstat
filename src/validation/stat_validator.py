@@ -6,21 +6,30 @@ Stats validation functions
 import pandas as pd
 from typing import Dict, List
 
-def categorize_unmatched_players(official_batting: pd.DataFrame, unmatched_names: List[str]) -> Dict:
-    """Categorize unmatched players"""
-    if official_batting.empty or not unmatched_names:
+def categorize_unmatched_players(official_df: pd.DataFrame, unmatched_names: List[str], name_column: str = None) -> Dict:
+    """Categorize unmatched players - works for both batting and pitching"""
+    if official_df.empty or not unmatched_names:
         return {'pinch_runners': [], 'name_mismatches': [], 'empty_stats': []}
     
+    # Auto-detect the correct column name
+    if name_column is None:
+        if 'player_name' in official_df.columns:
+            name_column = 'player_name'
+        elif 'pitcher_name' in official_df.columns:
+            name_column = 'pitcher_name'
+        else:
+            return {'pinch_runners': [], 'name_mismatches': [], 'empty_stats': []}
+
     pinch_runners = []
     name_mismatches = []
     empty_stats = []
     
     for name in unmatched_names:
-        if name in official_batting['player_name'].values:
-            player_row = official_batting[official_batting['player_name'] == name]
-        else:
-            continue
-            #player is likely a pitcher who had 0 batters faced (e.g. during only BF a base runner was caught stealing). edge case that can be ignored for now
+        # Use the correct column name instead of hardcoded 'player_name'
+        if name not in official_df[name_column].values:
+            continue  # Skip 0-BF pitchers
+        
+        player_row = official_df[official_df[name_column] == name]
         
         if player_row.empty:
             name_mismatches.append(name)
@@ -76,7 +85,7 @@ def compare_stats(official: pd.DataFrame, parsed: pd.DataFrame, stats: List[str]
     unmatched_official = list(official_names - parsed_names)
     unmatched_parsed = list(parsed_names - official_names)
     
-    player_categories = categorize_unmatched_players(official, unmatched_official)
+    player_categories = categorize_unmatched_players(official, unmatched_official, name_col)
     
     mismatch_info = {
         'unmatched_official_names': unmatched_official,

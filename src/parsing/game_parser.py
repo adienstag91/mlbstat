@@ -8,6 +8,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mlb_cached_fetcher import SafePageFetcher
+from utils.optimized_cache_system import HighPerformancePageFetcher
+fetcher = HighPerformancePageFetcher(max_cache_size_mb=500)
 from parsing.name_utils import normalize_name
 from parsing.game_utils import *
 from parsing.outcome_analyzer import analyze_outcome
@@ -140,3 +142,4 @@ def parse_play_by_play_events(soup: BeautifulSoup, game_id: str) -> pd.DataFrame
         events_df = fix_pitch_count_duplicates(events_df)
 
     return events_df
+

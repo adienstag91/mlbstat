@@ -136,3 +136,35 @@ Thumbs.db
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# MLB Cache Files
+cache/
+mlbstat/cache/
+mlb_cache.json
+cache_index.db
+*.cache.db
+*.gz
+
+# Batch Results (output files)
+batch_results/
+validation_results/
+batch_reports/
+output/
+results/
+
+# CSV outputs (but keep examples if you have them)
+*.csv
+!example*.csv
+
+# Other data files
+*.db
+*.sqlite
+*.sqlite3
+*.json
+!config.json
+!package.json
+
+# Logs
+*.log
+logs/
+debug_output/

@@ -222,14 +222,33 @@ def process_games_with_urls(game_urls: List[str], save_results: bool = True) -> 
     for i, url in enumerate(game_urls):
         try:
             print(f"Processing game {i+1}/{len(game_urls)}: {url}")
-            result = process_single_game(url) 
+            result = process_single_game(url, False) 
             game_results.append(result)
             
-            # Quick validation check
+            # Display Game Stats
             bat_acc = result['batting_validation']['accuracy']
             pit_acc = result['pitching_validation']['accuracy']
-            print(f"   ✅ {result['game_id']}: Batting {bat_acc:.1f}%, Pitching {pit_acc:.1f}%")
-            print(f"   ⏱️ {result['game_id']} took {result['time_to_process']:.2f} to process")
+            print(f"✅ {result['game_id']}: Batting {bat_acc:.1f}%, Pitching {pit_acc:.1f}%")
+            print(f"⏱️ {result['game_id']} took {result['time_to_process']:.2f} to process")
+
+            # Show actual stat differences (these are the real issues)
+            batting_differences = result['batting_validation']['differences']
+            pitching_differences = result['pitching_validation']['differences']
+        
+            if batting_differences:
+                print(f"🚨 Batting Differences: {len(batting_differences)} players")
+                first_diff = batting_differences[0]
+                print(f"      {first_diff['player']}: {first_diff['diffs'][0]}")
+                if len(batting_differences) > 1:
+                    print(f"      ... and {len(batting_differences) - 1} more")
+
+            if pitching_differences:
+                print(f"🚨 Pitching Differences: {len(pitching_differences)} pitchers")
+                first_diff = pitching_differences[0]
+                print(f"      {first_diff['player']}: {first_diff['diffs'][0]}")
+                if len(pitching_differences) > 1:
+                    print(f"      ... and {len(pitching_differences) - 1} more")
+
             
         except Exception as e:
             error_info = {
@@ -334,8 +353,8 @@ if __name__ == "__main__":
             run_season_validation(year, max_games=max_games)
     elif len(sys.argv) > 2 :
         sys.argv[1] == "team"
-        max_games = int(sys.argv[3]) if len(sys.argv) > 3 else 5
         team = sys.agv[2]
+        max_games = int(sys.argv[3]) if len(sys.argv) > 3 else 5
         run_team_validator(team, max_games=max_games)
     else:
         test_batch_validator()

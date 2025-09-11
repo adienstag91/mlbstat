@@ -8,6 +8,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mlb_cached_fetcher import SafePageFetcher
+from utils.optimized_cache_system import HighPerformancePageFetcher
+fetcher = HighPerformancePageFetcher(max_cache_size_mb=500)
 from validation.stat_validator import validate_batting_stats, validate_pitching_stats
 from parsing.game_parser import parse_official_batting, parse_official_pitching, parse_play_by_play_events
 from parsing.game_utils import *
@@ -22,7 +24,7 @@ def process_single_game(game_url: str, display_results: bool = True) -> Dict:
     """Process a complete game into events from the play-by-play and official stats from the box score"""
     start_time = time.time()
 
-    soup = SafePageFetcher.fetch_page(game_url)
+    soup = fetcher.fetch_page(game_url)
     
     game_id = extract_game_id(game_url)
     

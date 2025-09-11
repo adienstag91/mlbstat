@@ -6,6 +6,9 @@ Dynamically fetch game URLs from Baseball Reference by date or team.
 Filters for completed games only and provides flexible selection options.
 """
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
@@ -13,7 +16,10 @@ from typing import List, Optional
 import re
 import time
 from utils.mlb_cached_fetcher import SafePageFetcher
-import sys
+from utils.optimized_cache_system import HighPerformancePageFetcher
+fetcher = HighPerformancePageFetcher(max_cache_size_mb=500)
+
+
 
 def get_games_by_date(date: str, completed_only: bool = True) -> List[str]:
     """
@@ -32,7 +38,7 @@ def get_games_by_date(date: str, completed_only: bool = True) -> List[str]:
         print(url)
         url_date = year + month + day
 
-        soup = SafePageFetcher.fetch_page(url)
+        soup = fetcher.fetch_page(url)
         
         game_urls = []
         
@@ -76,7 +82,7 @@ def get_games_by_team(team_code: str, year: int = 2025, completed_only: bool = T
     try:
         url = f"https://www.baseball-reference.com/teams/{team_code}/{year}-schedule-scores.shtml"
         
-        soup = SafePageFetcher.fetch_page(url)
+        soup = fetcher.fetch_page(url)
         
         # Find the schedule table
         schedule_table = soup.find('table', {'id': 'team_schedule'})
