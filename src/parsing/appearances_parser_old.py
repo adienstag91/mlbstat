@@ -22,88 +22,10 @@ from io import StringIO
 from typing import Tuple, List, Dict, Optional
 import time
 
-from utils.optimized_cache_system import HighPerformancePageFetcher
+from utils.url_cacher import HighPerformancePageFetcher
 fetcher = HighPerformancePageFetcher(max_cache_size_mb=500)
 
-from parsing.name_utils import normalize_name
-from parsing.game_utils import safe_int, extract_from_details
-from parsing.game_metadata import extract_game_metadata
-
-
-def extract_name_and_positions(raw_entry: str) -> Tuple[str, List[str]]:
-    """Extract clean player name and positions from raw batting entry"""
-    # Remove decisions first (W, L, S, etc.)
-    cleaned = re.sub(r',\s*[WLSHB]+\s*\([^)]*\)', '', raw_entry).strip()
-    
-    positions = []
-    player_name = cleaned
-    
-    # Extract position codes at the end: "3B", "C-1B", "LF-CF", etc.
-    position_match = re.search(r'\s+([A-Z0-9]{1,2}(?:-[A-Z0-9]{1,2})*)\s*$', cleaned)
-    
-    if position_match:
-        position_codes = position_match.group(1)
-        player_name = cleaned[:position_match.start()].strip()
-        
-        # Handle multiple positions like "C-1B"
-        for code in position_codes.split('-'):
-            #expanded = expand_position_code(code.strip())
-            #if expanded and expanded not in positions:
-            positions.append(code)
-    
-    clean_name = normalize_name(player_name)
-    return clean_name, positions
-
-def expand_position_code(code: str) -> Optional[str]:
-    """Expand position codes to full names"""
-    position_map = {
-        'P': 'Pitcher', 'C': 'Catcher', '1B': 'First Base', '2B': 'Second Base',
-        '3B': 'Third Base', 'SS': 'Shortstop', 'LF': 'Left Field', 'CF': 'Center Field',
-        'RF': 'Right Field', 'DH': 'Designated Hitter', 'PH': 'Pinch Hitter', 'PR': 'Pinch Runner',
-    }
-    return position_map.get(code.upper())
-
-def extract_player_id(html_cell) -> Optional[str]:
-    """Extract Baseball Reference player ID from HTML cell"""
-    if not html_cell:
-        return None
-    
-    # Look for player links like /players/o/ohtansh01.shtml
-    link = html_cell.find('a', href=True)
-    if link and link.get('href'):
-        href = link.get('href')
-        # Extract player ID from URL
-        match = re.search(r'/players/[a-z]/([^.]+)\.shtml', href)
-        if match:
-            return match.group(1)
-    
-    return None
-
-def check_html_indentation(html_row) -> bool:
-    """Check if HTML row has indentation indicating a substitute"""
-    if not html_row:
-        return False
-    
-    cells = html_row.find_all(['td', 'th'])
-    if not cells:
-        return False
-    
-    # Check the player name cell for indentation markers
-    player_cell = cells[0]
-    
-    # Check for leading non-breaking spaces or regular spaces
-    cell_text = player_cell.get_text()
-    has_leading_spaces = bool(re.match(r'^[\s\xa0\u00a0]+', cell_text))
-    
-    # Check HTML content for &nbsp; entities
-    cell_html = str(player_cell)
-    has_nbsp_entities = '&nbsp;' in cell_html or '\xa0' in cell_html
-    
-    # Check for CSS indentation styles
-    cell_style = player_cell.get('style', '')
-    has_indent_style = any(prop in cell_style.lower() for prop in ['padding-left', 'margin-left', 'text-indent'])
-    
-    return has_leading_spaces or has_nbsp_entities or has_indent_style
+from parsing.parsing_utils import extract_game_id, safe_int, extract_from_details, normalize_name, extract_name_and_positions, check_html_indentation, extract_player_id, extract_pitcher_decisions
 
 def parse_batting_appearances(soup: BeautifulSoup) -> Tuple[pd.DataFrame, List[Dict]]:
     """
@@ -225,7 +147,7 @@ def parse_batting_appearances(soup: BeautifulSoup) -> Tuple[pd.DataFrame, List[D
             print(f"Error parsing batting table {table_idx}: {e}")
             continue
     
-    return pd.DataFrame(all_batting_stats), all_batting_appearances
+    return pd.DataFrame(all_batting_stats), pd.DataFrame(all_batting_appearances)
 
 def parse_pitching_appearances(soup: BeautifulSoup) -> Tuple[pd.DataFrame, List[Dict]]:
     """
@@ -263,6 +185,7 @@ def parse_pitching_appearances(soup: BeautifulSoup) -> Tuple[pd.DataFrame, List[
                 
                 # Build official stats record
                 pitching_stats = {
+                    'player_id': player_id,
                     'pitcher_name': pitcher_name,
                     'team': team,
                     'BF': safe_int(row.get('BF', 0)),
@@ -300,19 +223,6 @@ def parse_pitching_appearances(soup: BeautifulSoup) -> Tuple[pd.DataFrame, List[
     
     return pd.DataFrame(all_pitching_stats), all_pitching_appearances
 
-def extract_pitcher_decisions(raw_entry: str) -> Tuple[str, List[str]]:
-    """Extract pitcher name and all decisions (W, L, S, H, BS)"""
-    decisions = []
-    
-    # Find all decision patterns like ", W (1-0)", ", BS (2)", etc.
-    decision_matches = re.findall(r',\s*([WLSHB]+)\s*\([^)]*\)', raw_entry)
-    decisions.extend(decision_matches)
-    
-    # Remove all decision patterns to get clean name
-    clean_name = re.sub(r',\s*[WLSHB]+\s*\([^)]*\)', '', raw_entry).strip()
-    clean_name = normalize_name(clean_name)
-    
-    return clean_name, decisions
 
 def process_game_appearances(game_url: str) -> Dict:
     """
@@ -325,9 +235,7 @@ def process_game_appearances(game_url: str) -> Dict:
     # Fetch page
     soup = fetcher.fetch_page(game_url)
     
-    # Extract game metadata
-    game_metadata = extract_game_metadata(soup, game_url)
-    game_id = game_metadata['game_id']
+    game_id = extract_game_id(game_url)
     
     # Parse batting and pitching appearances
     official_batting, batting_appearances = parse_batting_appearances(soup)
@@ -337,7 +245,6 @@ def process_game_appearances(game_url: str) -> Dict:
     
     return {
         'game_id': game_id,
-        'game_metadata': game_metadata,
         
         # For validation against play-by-play
         'official_batting': official_batting,
@@ -478,4 +385,7 @@ def test_complete_appearances():
             print("  No home team pitching data")
 
 if __name__ == "__main__":
-    test_complete_appearances()
+    #test_complete_appearances()
+    test_results = process_game_appearances("https://www.baseball-reference.com/boxes/KCA/KCA202503290.shtml")
+    print(test_results['official_batting'])
+    print(f"\n{test_results['batting_appearances']}")

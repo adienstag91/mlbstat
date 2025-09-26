@@ -3,10 +3,21 @@ Event outcome analysis
 =====================
 """
 
-import re
-from typing import Optional, Dict
 
-def analyze_outcome(description: str) -> Optional[Dict]:
+import re
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from typing import Optional, Dict
+from io import StringIO
+import pandas as pd
+from bs4 import BeautifulSoup
+from utils.url_cacher import HighPerformancePageFetcher
+fetcher = HighPerformancePageFetcher(max_cache_size_mb=500)
+from parsing.parsing_utils import *
+
+def analyze_event_outcome(description: str) -> Optional[Dict]:
     """Analyze play outcome - handles all types of baseball events"""
     desc = description.lower().strip()
     outcome = {
@@ -139,3 +150,109 @@ def analyze_outcome(description: str) -> Optional[Dict]:
             return outcome
             
     return None
+
+def parse_single_event(row: pd.Series, game_id: str, event_order: int = 0) -> Optional[Dict]:
+    """Parse a single play-by-play row into structured event"""
+    batter_name = normalize_name(row['Batter'])
+    pitcher_name = normalize_name(row['Pitcher'])
+    description = str(row['Play Description']).strip()
+    
+    outcome = analyze_event_outcome(description)
+    if not outcome:
+        return None
+    
+    return {
+        'event_id': generate_event_id(),
+        'game_id': game_id,
+        'inning': parse_inning(row.get('Inn', '')),
+        'inning_half': parse_inning_half(row.get('Inn', '')),
+        'batter_id': batter_name,
+        'pitcher_id': pitcher_name,
+        'description': description,
+        'is_plate_appearance': outcome['is_plate_appearance'],
+        'is_at_bat': outcome['is_at_bat'],
+        'is_hit': outcome['is_hit'],
+        'hit_type': outcome.get('hit_type'),
+        'is_walk': outcome['is_walk'],
+        'is_strikeout': outcome['is_strikeout'],
+        'is_sacrifice_fly': outcome['is_sacrifice_fly'],
+        'is_sacrifice_hit': outcome['is_sacrifice_hit'],
+        'is_out': outcome['is_out'],
+        'outs_recorded': outcome['outs_recorded'],
+        'bases_reached': outcome['bases_reached'],
+        'pitch_count': parse_pitch_count(row.get('Pit(cnt)', '')),
+        'event_order': event_order,
+    }
+
+def parse_play_by_play_events(soup: BeautifulSoup, game_id: str) -> pd.DataFrame:
+    """Parse all play-by-play events from game"""
+    pbp_table = soup.find("table", id="play_by_play")
+    if not pbp_table:
+        return pd.DataFrame()
+    
+    try:
+        df = pd.read_html(StringIO(str(pbp_table)))[0]
+    except Exception:
+        return pd.DataFrame()
+    
+    df = df[df['Inn'].notna() & df['Play Description'].notna() & df['Pitcher'].notna()]
+    df = df[~df['Batter'].str.contains("Top of the|Bottom of the", case=False, na=False)]
+    
+    events = []
+    for event_order, (_, row) in enumerate(df.iterrows(), start=1):
+        event = parse_single_event(row, game_id, event_order)
+        if event:
+            events.append(event)
+
+    events_df = pd.DataFrame(events)
+    if not events_df.empty:
+        # Fix pitch counts first
+        events_df = fix_pitch_count_duplicates(events_df)
+        
+        # THEN reassign proper sequential order
+        events_df = events_df.reset_index(drop=True)
+        events_df['event_order'] = range(1, len(events_df) + 1)
+
+    return events_df
+
+def test_events_parser(game_url):
+    """Test the play by play events parser"""
+
+    # Fetch page
+    soup = fetcher.fetch_page(game_url)
+    game_id = extract_game_id(game_url)
+    
+    print(f"Testing play-by-play events parser: {game_url}")
+    print("=" * 60)
+    
+    # Process game
+    results = parse_play_by_play_events(soup, game_id)
+    
+    print(f"\nPLAY-BY-PLAY EVENTS:")
+    print (results)
+    return results
+
+
+class SimpleFetcher:
+    """Temporary fetcher for testing without cache database conflicts"""
+    
+    def fetch_page(self, url: str) -> BeautifulSoup:
+        from playwright.sync_api import sync_playwright
+        
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            )
+            page = context.new_page()
+            page.set_default_timeout(30000)
+            page.goto(url, wait_until='domcontentloaded')
+            page.wait_for_timeout(2000)
+            html_content = page.content()
+            browser.close()
+        
+        return BeautifulSoup(html_content, "html.parser")
+
+if __name__ == "__main__":
+    game_url = "https://www.baseball-reference.com/boxes/KCA/KCA202503290.shtml"
+    test_events_parser(game_url)

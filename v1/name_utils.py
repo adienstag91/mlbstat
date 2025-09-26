@@ -4,7 +4,7 @@ Name resolution and normalization functions
 """
 
 import re
-import unicodedata
+import unidecode
 import pandas as pd
 from typing import Dict, Set
 from bs4 import BeautifulSoup

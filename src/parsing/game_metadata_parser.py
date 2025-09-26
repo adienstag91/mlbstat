@@ -11,8 +11,9 @@ from datetime import datetime
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.optimized_cache_system import HighPerformancePageFetcher
+from utils.url_cacher import HighPerformancePageFetcher
 fetcher = HighPerformancePageFetcher(max_cache_size_mb=500)
+from parsing.parsing_utils import extract_game_id
 
 
 def extract_game_metadata(soup: BeautifulSoup, game_url: str) -> Dict:
@@ -20,7 +21,15 @@ def extract_game_metadata(soup: BeautifulSoup, game_url: str) -> Dict:
     
     scorebox = soup.find('div', class_='scorebox')
     if not scorebox:
-        return create_empty_metadata(game_url)
+        return {
+        'game_id': extract_game_id(game_url),
+        'game_url': game_url,
+        'home_team': None, 'away_team': None,
+        'runs_home_team': None, 'runs_away_team': None, 'winner': None,
+        'date': None, 'game_time': None, 'venue': None,
+        'is_playoff': False, 'playoff_round': None,
+        'player_positions': {}, 'player_profile_urls': {}
+    }
     
     metadata = {
         'game_id': extract_game_id(game_url),
@@ -40,10 +49,6 @@ def extract_game_metadata(soup: BeautifulSoup, game_url: str) -> Dict:
         # Simple game type detection
         'is_playoff': is_playoff_game(soup),
         'playoff_round': get_playoff_round(soup),
-        
-        # Player data
-        'player_positions': extract_player_positions(soup),
-        'player_profile_urls': extract_player_urls(soup),
 
         # Game length info
         'innings_played': get_innings_played(soup),
@@ -61,11 +66,6 @@ def extract_game_metadata(soup: BeautifulSoup, game_url: str) -> Dict:
         metadata['winner'] = None
     
     return metadata
-
-def extract_game_id(url: str) -> str:
-    """Extract game ID from URL - this one regex is justified"""
-    match = re.search(r'/boxes/[A-Z]{3}/([A-Z]{3}\d{8,9})', url)
-    return match.group(1) if match else 'unknown'
 
 def get_team_from_scorebox(scorebox: BeautifulSoup, position: str) -> Optional[str]:
     """Get team from scorebox links"""
@@ -313,90 +313,6 @@ def get_playoff_round(soup: BeautifulSoup) -> Optional[str]:
             return 'World Series'
     
     return 'Playoff'
-
-def extract_player_positions(soup: BeautifulSoup) -> Dict[str, List[str]]:
-    """Extract player positions from batting tables"""
-    
-    positions = {}
-    batting_tables = soup.find_all('table', {'id': lambda x: x and 'batting' in x})
-    
-    for table in batting_tables:
-        try:
-            df = pd.StringIO(read_html(str(table))[0])
-            
-            for _, row in df.iterrows():
-                player_col = row.get('Batting', '')
-                if pd.isna(player_col) or 'Team Totals' in str(player_col):
-                    continue
-                
-                player_str = str(player_col).strip()
-                parts = player_str.split()
-                
-                if len(parts) >= 2:
-                    # Check if last part looks like position code(s)
-                    potential_pos = parts[-1]
-                    
-                    if re.match(r'^[A-Z]{1,3}(?:-[A-Z]{1,3})*$', potential_pos):
-                        player_name = ' '.join(parts[:-1])
-                        pos_codes = potential_pos.split('-')
-                        
-                        full_positions = []
-                        for code in pos_codes:
-                            full_pos = expand_position_code(code)
-                            if full_pos:
-                                full_positions.append(full_pos)
-                        
-                        if player_name and full_positions:
-                            positions[player_name] = full_positions
-                
-        except Exception:
-            continue
-    
-    return positions
-
-def expand_position_code(code: str) -> Optional[str]:
-    """Expand position codes to full names"""
-    position_map = {
-        'P': 'Pitcher', 'C': 'Catcher',
-        '1B': 'First Base', '2B': 'Second Base', '3B': 'Third Base', 'SS': 'Shortstop',
-        'LF': 'Left Field', 'CF': 'Center Field', 'RF': 'Right Field',
-        'DH': 'Designated Hitter', 'PH': 'Pinch Hitter', 'PR': 'Pinch Runner'
-    }
-    return position_map.get(code.upper())
-
-def extract_player_urls(soup: BeautifulSoup) -> Dict[str, str]:
-    """Extract player profile URLs"""
-    
-    urls = {}
-    tables = soup.find_all('table', {'id': lambda x: x and ('batting' in x or 'pitching' in x)})
-    
-    for table in tables:
-        links = table.find_all('a', href=re.compile(r'/players/[a-z]/[a-z]+\d+\.shtml'))
-        
-        for link in links:
-            player_name = link.get_text().strip()
-            profile_url = 'https://www.baseball-reference.com' + link.get('href')
-            
-            # Clean player name (remove position codes)
-            clean_name = re.sub(r'\s+[A-Z]{1,3}$', '', player_name).strip()
-            
-            if clean_name:
-                urls[clean_name] = profile_url
-    
-    return urls
-
-def create_empty_metadata(game_url: str) -> Dict:
-    """Create empty metadata if scorebox not found"""
-    return {
-        'game_id': extract_game_id(game_url),
-        'game_url': game_url,
-        'home_team': None, 'away_team': None,
-        'runs_home_team': None, 'runs_away_team': None, 'winner': None,
-        'date': None, 'game_time': None, 'venue': None,
-        'is_playoff': False, 'playoff_round': None,
-        'player_positions': {}, 'player_profile_urls': {}
-    }
-
 
 if __name__ == "__main__":
     game_url = "https://www.baseball-reference.com/boxes/LAN/LAN202410250.shtml"

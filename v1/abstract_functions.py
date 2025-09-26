@@ -23,6 +23,7 @@ def get_all_functions(directory):
 # Replace with your actual directory containing Python files
 directory_path = "/Users/andrewdienstag/mlbstat/src"  
 functions_by_file = get_all_functions(directory_path)
+print(functions_by_file)
 
 # Print results
 for file, functions in functions_by_file.items():
