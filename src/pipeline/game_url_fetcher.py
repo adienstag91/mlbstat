@@ -15,9 +15,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import re
 import time
-from utils.mlb_cached_fetcher import SafePageFetcher
-from utils.optimized_cache_system import HighPerformancePageFetcher
-fetcher = HighPerformancePageFetcher(max_cache_size_mb=500)
+from utils.url_cacher import HighPerformancePageFetcher
+fetcher = HighPerformancePageFetcher("NYY_Debug.db",max_cache_size_mb=500)
 
 
 

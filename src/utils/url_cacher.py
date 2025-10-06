@@ -17,6 +17,27 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import logging
+import threading
+
+class SimpleFetcher:
+    """Temporary fetcher for testing without cache database conflicts"""
+    
+    def fetch_page(self, url: str) -> BeautifulSoup:
+        from playwright.sync_api import sync_playwright
+        
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            )
+            page = context.new_page()
+            page.set_default_timeout(30000)
+            page.goto(url, wait_until='domcontentloaded')
+            page.wait_for_timeout(2000)
+            html_content = page.content()
+            browser.close()
+        
+        return BeautifulSoup(html_content, "html.parser")
 
 class OptimizedMLBCache:
     """
@@ -339,24 +360,27 @@ class OptimizedMLBCache:
 
 class HighPerformancePageFetcher:
     """
-    MLB page fetcher with optimized caching
+    MLB page fetcher with optimized caching and rate limiting
     Drop-in replacement for SafePageFetcher with massive performance gains
     """
     
-    def __init__(self, cache_dir: str = None, max_cache_size_mb: int = 500):
+    def __init__(self, cache_dir: str = None, max_cache_size_mb: int = 500, 
+                 rate_limit_delay: float = 1.0):
         if cache_dir is None:
             import os
-            # Expand ~ to home directory, then add your project path
             cache_dir = os.path.expanduser("~/mlbstat/cache")
-            # Or absolute path:
-            # cache_dir = "/Users/yourname/mlbstat/cache"
         
         self.cache = OptimizedMLBCache(cache_dir, max_cache_size_mb)
         self.logger = logging.getLogger(__name__)
+        
+        # Rate limiting attributes
+        self.rate_limit_delay = rate_limit_delay
+        self.last_fetch_time = 0
+        self.fetch_lock = threading.Lock()
     
     def fetch_page(self, url: str, max_retries: int = 3, force_refresh: bool = False) -> BeautifulSoup:
         """
-        High-performance page fetching with optimized caching
+        High-performance page fetching with optimized caching and rate limiting
         
         Args:
             url: URL to fetch
@@ -373,32 +397,44 @@ class HighPerformancePageFetcher:
             if cached_soup is not None:
                 return cached_soup
         
-        # Cache miss - fetch fresh data
-        self.logger.info(f"🌍 Fetching fresh data: {url}")
-        
-        html_content = None
-        for attempt in range(max_retries):
-            try:
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True)
-                    context = browser.new_context(
-                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    )
-                    page = context.new_page()
-                    page.set_default_timeout(30000)
-                    page.goto(url, wait_until='domcontentloaded')
-                    page.wait_for_timeout(2000)
-                    html_content = page.content()
-                    browser.close()
-                    break  # Success!
-                    
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    wait_time = 3 * (attempt + 1)
-                    self.logger.warning(f"❌ Attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s...")
-                    time.sleep(wait_time)
-                else:
-                    raise Exception(f"Failed to fetch {url} after {max_retries} attempts: {e}")
+        # Cache miss - fetch fresh data with rate limiting
+        with self.fetch_lock:
+            # Rate limit: ensure minimum delay between fetches
+            time_since_last = time.time() - self.last_fetch_time
+            
+            if time_since_last < self.rate_limit_delay:
+                sleep_time = self.rate_limit_delay - time_since_last
+                self.logger.debug(f"Rate limiting: waiting {sleep_time:.2f}s")
+                time.sleep(sleep_time)
+            
+            self.logger.info(f"Fetching fresh data: {url}")
+            
+            html_content = None
+            for attempt in range(max_retries):
+                try:
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        context = browser.new_context(
+                            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        )
+                        page = context.new_page()
+                        page.set_default_timeout(30000)
+                        page.goto(url, wait_until='domcontentloaded')
+                        page.wait_for_timeout(2000)
+                        html_content = page.content()
+                        browser.close()
+                        break  # Success!
+                        
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        wait_time = 3 * (attempt + 1)
+                        self.logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        raise Exception(f"Failed to fetch {url} after {max_retries} attempts: {e}")
+            
+            # Update last fetch time
+            self.last_fetch_time = time.time()
         
         # Cache the successful result
         if html_content and html_content.strip():
@@ -414,7 +450,7 @@ class HighPerformancePageFetcher:
         """Print detailed cache status"""
         stats = self.get_cache_stats()
         
-        print(f"\n📊 OPTIMIZED MLB CACHE SUMMARY")
+        print(f"\nOPTIMIZED MLB CACHE SUMMARY")
         print("=" * 40)
         print(f"Total requests: {stats['total_requests']}")
         print(f"Cache hits: {stats['cache_hits']}")
@@ -431,7 +467,7 @@ class HighPerformancePageFetcher:
         """Remove expired entries from cache"""
         removed_count = self.cache.cleanup_expired()
         if removed_count == 0:
-            print("✅ No expired cache entries found")
+            print("No expired cache entries found")
     
     def clear_cache(self, category: Optional[str] = None) -> None:
         """Clear cache for specific category or entire cache"""

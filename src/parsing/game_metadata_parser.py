@@ -11,7 +11,7 @@ from datetime import datetime
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.url_cacher import HighPerformancePageFetcher
+from utils.url_cacher import HighPerformancePageFetcher, SimpleFetcher
 fetcher = HighPerformancePageFetcher(max_cache_size_mb=500)
 from parsing.parsing_utils import extract_game_id
 
@@ -20,50 +20,32 @@ def extract_game_metadata(soup: BeautifulSoup, game_url: str) -> Dict:
     """Extract metadata using HTML structure, not regex patterns"""
     
     scorebox = soup.find('div', class_='scorebox')
-    if not scorebox:
-        return {
-        'game_id': extract_game_id(game_url),
-        'game_url': game_url,
-        'home_team': None, 'away_team': None,
-        'runs_home_team': None, 'runs_away_team': None, 'winner': None,
-        'date': None, 'game_time': None, 'venue': None,
-        'is_playoff': False, 'playoff_round': None,
-        'player_positions': {}, 'player_profile_urls': {}
-    }
+    
+    # Extract base data first
+    home_team = get_team_from_scorebox(scorebox, position='home')
+    away_team = get_team_from_scorebox(scorebox, position='away')
+    runs_home = get_score_from_scorebox(scorebox, position='home')
+    runs_away = get_score_from_scorebox(scorebox, position='away')
+    
+    # Calculate derived values using base data
+    winner, loser = determine_winner_loser(home_team, away_team, runs_home, runs_away)
     
     metadata = {
         'game_id': extract_game_id(game_url),
         'game_url': game_url,
-        
-        # From scorebox structure
-        'home_team': get_team_from_scorebox(scorebox, position='home'),
-        'away_team': get_team_from_scorebox(scorebox, position='away'),
-        'runs_home_team': get_score_from_scorebox(scorebox, position='home'),
-        'runs_away_team': get_score_from_scorebox(scorebox, position='away'),
-        
-        # From structured meta elements
+        'home_team': home_team,
+        'away_team': away_team,
+        'runs_home_team': runs_home,
+        'runs_away_team': runs_away,
+        'winner': winner,
+        'loser': loser,
         'venue': get_venue_from_structure(scorebox),
-        'date': get_date_from_structure(scorebox),
+        'game_date': get_date_from_structure(scorebox),
         'game_time': get_time_from_structure(scorebox),
-        
-        # Simple game type detection
         'is_playoff': is_playoff_game(soup),
         'playoff_round': get_playoff_round(soup),
-
-        # Game length info
         'innings_played': get_innings_played(soup),
     }
-    
-    # Calculate winner
-    if metadata['runs_home_team'] is not None and metadata['runs_away_team'] is not None:
-        if metadata['runs_home_team'] > metadata['runs_away_team']:
-            metadata['winner'] = metadata['home_team']
-        elif metadata['runs_away_team'] > metadata['runs_home_team']:
-            metadata['winner'] = metadata['away_team']
-        else:
-            metadata['winner'] = 'Tie'
-    else:
-        metadata['winner'] = None
     
     return metadata
 
@@ -97,6 +79,26 @@ def get_score_from_scorebox(scorebox: BeautifulSoup, position: str) -> Optional[
             pass
     
     return None
+
+def determine_winner_loser(home_team: str, away_team: str, 
+                           runs_home: int, runs_away: int) -> tuple[str, str]:
+    """
+    Determine winner and loser from scores
+    
+    Returns:
+        (winner, loser) tuple, or (None, None) if tie/incomplete
+    """
+    if runs_home is None or runs_away is None:
+        return None, None
+    
+    if runs_home > runs_away:
+        return home_team, away_team
+    elif runs_away > runs_home:
+        return away_team, home_team
+    else:
+        return None, None  # Tie (shouldn't happen in baseball, but safe)
+
+
 
 def get_venue_from_structure(scorebox: BeautifulSoup) -> Optional[str]:
     """
@@ -316,10 +318,11 @@ def get_playoff_round(soup: BeautifulSoup) -> Optional[str]:
 
 if __name__ == "__main__":
     game_url = "https://www.baseball-reference.com/boxes/LAN/LAN202410250.shtml"
+    fetcher = SimpleFetcher()
     soup = fetcher.fetch_page(game_url)
     test_meta_data = extract_game_metadata(soup,game_url)
     print(f"Game ID: {test_meta_data['game_id']}")
-    print(f"Game Date: {test_meta_data['date']}")
+    print(f"Game Date: {test_meta_data['game_date']}")
     print(f"Game Time: {test_meta_data['game_time']}")
     print(f"Venue: {test_meta_data['venue']}")
     print(f"Home Team: {test_meta_data['home_team']}")
@@ -330,5 +333,6 @@ if __name__ == "__main__":
     print(f"{test_meta_data['home_team']} Runs: {test_meta_data['runs_home_team']}")
     print(f"{test_meta_data['away_team']} Runs: {test_meta_data['runs_away_team']}")
     print(f"Winner: {test_meta_data['winner']}")
+    print(f"Loser: {test_meta_data['loser']}")
 
 

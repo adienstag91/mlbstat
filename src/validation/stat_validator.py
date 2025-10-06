@@ -154,7 +154,7 @@ def validate_batting_stats(official: pd.DataFrame, events: pd.DataFrame) -> Dict
     meaningful_stats = official[meaningful_columns].sum(axis=1) > 0
     official = official[meaningful_stats]
     
-    parsed = events.groupby('batter_id').agg({
+    parsed = events.groupby('batter_name').agg({
         'is_plate_appearance': 'sum',
         'is_at_bat': 'sum',
         'is_hit': 'sum',
@@ -164,17 +164,17 @@ def validate_batting_stats(official: pd.DataFrame, events: pd.DataFrame) -> Dict
     
     hit_types = ['home_run', 'double', 'triple']
     for hit_type in hit_types:
-        hit_agg = events[events['hit_type'] == hit_type].groupby('batter_id').size().reset_index(name=f'parsed_{hit_type.upper().replace("_", "")}')
+        hit_agg = events[events['hit_type'] == hit_type].groupby('batter_name').size().reset_index(name=f'parsed_{hit_type.upper().replace("_", "")}')
         if hit_type == 'home_run':
             hit_agg = hit_agg.rename(columns={'parsed_HR': 'parsed_HR'})
         elif hit_type == 'double':
             hit_agg = hit_agg.rename(columns={'parsed_DOUBLE': 'parsed_2B'})
         elif hit_type == 'triple':
             hit_agg = hit_agg.rename(columns={'parsed_TRIPLE': 'parsed_3B'})
-        parsed = parsed.merge(hit_agg, on='batter_id', how='left').fillna(0)
+        parsed = parsed.merge(hit_agg, on='batter_name', how='left').fillna(0)
     
     parsed = parsed.rename(columns={
-        'batter_id': 'player_name',
+        'batter_name': 'player_name',
         'is_plate_appearance': 'parsed_PA',
         'is_at_bat': 'parsed_AB',
         'is_hit': 'parsed_H',
@@ -189,7 +189,7 @@ def validate_pitching_stats(official: pd.DataFrame, events: pd.DataFrame) -> Dic
     if official.empty or events.empty:
         return {'accuracy': 0, 'players_compared': 0}
     
-    parsed = events.groupby('pitcher_id').agg({
+    parsed = events.groupby('pitcher_name').agg({
         'is_plate_appearance': 'sum',
         'is_hit': 'sum',
         'is_walk': 'sum',
@@ -197,11 +197,11 @@ def validate_pitching_stats(official: pd.DataFrame, events: pd.DataFrame) -> Dic
         'pitch_count': 'sum'
     }).reset_index()
     
-    hr_agg = events[events['hit_type'] == 'home_run'].groupby('pitcher_id').size().reset_index(name='parsed_HR')
-    parsed = parsed.merge(hr_agg, on='pitcher_id', how='left').fillna(0)
+    hr_agg = events[events['hit_type'] == 'home_run'].groupby('pitcher_name').size().reset_index(name='parsed_HR')
+    parsed = parsed.merge(hr_agg, on='pitcher_name', how='left').fillna(0)
     
     parsed = parsed.rename(columns={
-        'pitcher_id': 'pitcher_name',
+        'pitcher_name': 'pitcher_name',
         'is_plate_appearance': 'parsed_BF',
         'is_hit': 'parsed_H',
         'is_walk': 'parsed_BB',

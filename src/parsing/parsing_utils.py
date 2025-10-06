@@ -75,8 +75,8 @@ def fix_pitch_count_duplicates(events: pd.DataFrame) -> pd.DataFrame:
             if not is_last_event:
                 next_event = events.loc[indices[i + 1]]
                 if (next_event['is_plate_appearance'] and 
-                    next_event['batter_id'] == event['batter_id'] and
-                    next_event['pitcher_id'] == event['pitcher_id']):
+                    next_event['batter_name'] == event['batter_name'] and
+                    next_event['pitcher_name'] == event['pitcher_name']):
                     has_followup_pa = True
             
             if has_followup_pa:

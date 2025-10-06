@@ -13,7 +13,7 @@ from typing import Optional, Dict
 from io import StringIO
 import pandas as pd
 from bs4 import BeautifulSoup
-from utils.url_cacher import HighPerformancePageFetcher
+from utils.url_cacher import HighPerformancePageFetcher, SimpleFetcher
 fetcher = HighPerformancePageFetcher(max_cache_size_mb=500)
 from parsing.parsing_utils import *
 
@@ -166,8 +166,8 @@ def parse_single_event(row: pd.Series, game_id: str, event_order: int = 0) -> Op
         'game_id': game_id,
         'inning': parse_inning(row.get('Inn', '')),
         'inning_half': parse_inning_half(row.get('Inn', '')),
-        'batter_id': batter_name,
-        'pitcher_id': pitcher_name,
+        'batter_name': batter_name,
+        'pitcher_name': pitcher_name,
         'description': description,
         'is_plate_appearance': outcome['is_plate_appearance'],
         'is_at_bat': outcome['is_at_bat'],
@@ -219,7 +219,8 @@ def test_events_parser(game_url):
     """Test the play by play events parser"""
 
     # Fetch page
-    soup = fetcher.fetch_page(game_url)
+    simplefetch = SimpleFetcher()
+    soup = simplefetch.fetch_page(game_url)
     game_id = extract_game_id(game_url)
     
     print(f"Testing play-by-play events parser: {game_url}")
@@ -231,27 +232,6 @@ def test_events_parser(game_url):
     print(f"\nPLAY-BY-PLAY EVENTS:")
     print (results)
     return results
-
-
-class SimpleFetcher:
-    """Temporary fetcher for testing without cache database conflicts"""
-    
-    def fetch_page(self, url: str) -> BeautifulSoup:
-        from playwright.sync_api import sync_playwright
-        
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            )
-            page = context.new_page()
-            page.set_default_timeout(30000)
-            page.goto(url, wait_until='domcontentloaded')
-            page.wait_for_timeout(2000)
-            html_content = page.content()
-            browser.close()
-        
-        return BeautifulSoup(html_content, "html.parser")
 
 if __name__ == "__main__":
     game_url = "https://www.baseball-reference.com/boxes/KCA/KCA202503290.shtml"

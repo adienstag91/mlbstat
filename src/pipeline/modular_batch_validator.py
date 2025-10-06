@@ -330,6 +330,7 @@ def test_batch_validator():
         "https://www.baseball-reference.com//boxes/CLE/CLE202505300.shtml",
         "https://www.baseball-reference.com//boxes/ANA/ANA202506230.shtml",
         "https://www.baseball-reference.com//boxes/ATL/ATL202506270.shtml",
+        "https://www.baseball-reference.com/boxes/NYA/NYA202505170.shtml"
         # Add more test URLs here
     ]
     
@@ -355,6 +356,6 @@ if __name__ == "__main__":
         sys.argv[1] == "team"
         team = sys.agv[2]
         max_games = int(sys.argv[3]) if len(sys.argv) > 3 else 5
-        run_team_validator(team, max_games=max_games)
+        run_season_validation("2025", "NYY", max_games=max_games)
     else:
         test_batch_validator()
