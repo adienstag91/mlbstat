@@ -223,22 +223,6 @@ class MLBGameProcessor:
             'errors': self.stats['errors']
         }
     
-    def build_season(self, game_urls: List[str], season_name: str = "Season") -> Dict[str, Any]:
-        """Build a complete season dataset with progress reporting"""
-        self.logger.info(f"Building {season_name} with {len(game_urls)} games")
-        
-        # Process all games
-        batch_results = self.process_multiple_games(game_urls, halt_on_failure=False)
-        
-        # Generate season report
-        season_report = self._generate_season_report(batch_results, season_name)
-        
-        return {
-            'season_name': season_name,
-            'batch_results': batch_results,
-            'season_report': season_report
-        }
-    
     def get_database_summary(self) -> Dict[str, Any]:
         """Get comprehensive database statistics"""
         with sqlite3.connect(self.db_path) as conn:
@@ -364,16 +348,18 @@ class MLBGameProcessor:
         try:
             with sqlite3.connect(self.db_path, timeout=30.0) as conn:
                 cursor = conn.cursor()
+
+                game_id = parsing_results['game_id']
                 
                 # Store in dependency order
                 players_stored = self._store_players(parsing_results["players_encountered"], cursor)
-                game_stored = self._store_game_metadata(parsing_results["game_metadata"], cursor)
-                batting_stored = self._store_batting_appearances(parsing_results["batting_appearances"], cursor)
-                pitching_stored = self._store_pitching_appearances(parsing_results["pitching_appearances"], cursor)
-                events_stored = self._store_play_by_play_events(parsing_results["play_by_play_events"], cursor)
+                game_stored = self._store_game_metadata(game_id, parsing_results["game_metadata"], cursor)
+                batting_stored = self._store_batting_appearances(game_id, parsing_results["batting_appearances"], cursor)
+                pitching_stored = self._store_pitching_appearances(game_id, parsing_results["pitching_appearances"], cursor)
+                events_stored = self._store_play_by_play_events(game_id, parsing_results["play_by_play_events"], cursor)
                 
                 # Store validation report
-                self._store_validation_report(parsing_results["game_id"], validation_results, cursor)
+                self._store_validation_report(game_id, validation_results, cursor)
                 
                 conn.commit()
                 
@@ -534,7 +520,7 @@ class MLBGameProcessor:
         
         return stored_count
     
-    def _store_game_metadata(self, game_metadata: Dict, cursor) -> int:
+    def _store_game_metadata(self, game_id: str, game_metadata: Dict, cursor) -> int:
         """Store game to games table"""
         cursor.execute("""
             INSERT OR REPLACE INTO games 
@@ -557,13 +543,22 @@ class MLBGameProcessor:
         ))
         return cursor.rowcount
     
-    def _store_batting_appearances(self, batting_df: pd.DataFrame, cursor) -> int:
+    def _store_batting_appearances(self, game_id: str, batting_df: pd.DataFrame, cursor) -> int:
         """Store batting appearances to dedicated table"""
         if batting_df.empty:
             return 0
             
         stored_count = 0
         for _, row in batting_df.iterrows():
+            # Check if exists
+            cursor.execute("""
+                SELECT COUNT(*) FROM batting_appearances 
+                WHERE game_id = ? AND player_id = ?
+            """, (game_id, row['player_id']))
+            
+            if cursor.fetchone()[0] > 0:
+                continue  # Skip duplicate
+
             cursor.execute("""
                 INSERT OR REPLACE INTO batting_appearances 
                 (game_id, player_id, player_name, team, batting_order, positions_played, 
@@ -582,13 +577,22 @@ class MLBGameProcessor:
             stored_count += cursor.rowcount
         return stored_count
     
-    def _store_pitching_appearances(self, pitching_df: pd.DataFrame, cursor) -> int:
+    def _store_pitching_appearances(self, game_id: str, pitching_df: pd.DataFrame, cursor) -> int:
         """Store pitching appearances to dedicated table"""
         if pitching_df.empty:
             return 0
             
         stored_count = 0
         for _, row in pitching_df.iterrows():
+            # Check if exists
+            cursor.execute("""
+                SELECT COUNT(*) FROM batting_appearances 
+                WHERE game_id = ? AND player_id = ?
+            """, (game_id, row['player_id']))
+            
+            if cursor.fetchone()[0] > 0:
+                continue  # Skip duplicate
+
             cursor.execute("""
                 INSERT OR REPLACE INTO pitching_appearances
                 (game_id, player_id, player_name, team, is_starter, pitching_order, 
@@ -606,7 +610,7 @@ class MLBGameProcessor:
             stored_count += cursor.rowcount
         return stored_count
     
-    def _store_play_by_play_events(self, events: pd.DataFrame, cursor) -> int:
+    def _store_play_by_play_events(self, game_id: str, events: pd.DataFrame, cursor) -> int:
         """Store play-by-play events to at_bats table"""
         if events.empty:
             return 0
@@ -662,58 +666,6 @@ class MLBGameProcessor:
             return overall_validation.status == ValidationResult.PASS
         else:
             return overall_validation.status != ValidationResult.FAIL
-    
-    def _generate_season_report(self, batch_results: Dict, season_name: str) -> Dict[str, Any]:
-        """Generate comprehensive season report"""
-        summary = batch_results['summary']
-        
-        return {
-            'season_name': season_name,
-            'total_games': summary['total_games'],
-            'successful_games': summary['successful_games'],
-            'success_rate': summary['success_rate'],
-            'total_events': summary['total_events'],
-            'avg_batting_accuracy': summary['avg_batting_accuracy'],
-            'avg_pitching_accuracy': summary['avg_pitching_accuracy'],
-            'processing_time_hours': summary['processing_time_minutes'] / 60,
-            'games_per_hour': summary['games_per_minute'] * 60,
-            'quality_grade': self._calculate_quality_grade(summary),
-            'recommendations': self._generate_recommendations(summary, batch_results['errors'])
-        }
-    
-    def _calculate_quality_grade(self, summary: Dict) -> str:
-        """Calculate overall quality grade for the season"""
-        success_rate = summary['success_rate']
-        avg_accuracy = (summary['avg_batting_accuracy'] + summary['avg_pitching_accuracy']) / 2
-        
-        if success_rate >= 95 and avg_accuracy >= 98:
-            return 'A+'
-        elif success_rate >= 90 and avg_accuracy >= 95:
-            return 'A'
-        elif success_rate >= 80 and avg_accuracy >= 90:
-            return 'B'
-        elif success_rate >= 70 and avg_accuracy >= 85:
-            return 'C'
-        else:
-            return 'D'
-    
-    def _generate_recommendations(self, summary: Dict, errors: List) -> List[str]:
-        """Generate recommendations for improving data quality"""
-        recommendations = []
-        
-        if summary['success_rate'] < 90:
-            recommendations.append("Consider investigating failed games for common parsing issues")
-        
-        if summary['avg_batting_accuracy'] < 95:
-            recommendations.append("Review batting stat validation logic for accuracy improvements")
-        
-        if summary['avg_pitching_accuracy'] < 95:
-            recommendations.append("Review pitching stat validation logic for accuracy improvements")
-        
-        if len(errors) > summary['total_games'] * 0.1:
-            recommendations.append("High error rate detected - consider URL validation and retry logic")
-        
-        return recommendations
     
     def _extract_game_id_from_url(self, url: str) -> str:
         """Extract game ID from URL for error reporting"""
@@ -803,7 +755,8 @@ class MLBGameProcessor:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 
                 FOREIGN KEY (game_id) REFERENCES games(game_id),
-                FOREIGN KEY (player_id) REFERENCES players(player_id)
+                FOREIGN KEY (player_id) REFERENCES players(player_id),
+                UNIQUE(game_id, player_id)
             )
         """)
 
@@ -830,7 +783,8 @@ class MLBGameProcessor:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 
                 FOREIGN KEY (game_id) REFERENCES games(game_id),
-                FOREIGN KEY (player_id) REFERENCES players(player_id)
+                FOREIGN KEY (player_id) REFERENCES players(player_id),
+                UNIQUE(game_id, player_id)
             )
         """)
 
@@ -931,13 +885,6 @@ def process_game_list(game_urls: List[str], db_path: str = "mlb_games.db",
     processor = MLBGameProcessor(db_path, validation_threshold, max_workers)
     return processor.process_multiple_games(game_urls)
 
-def build_team_season(team_code: str, year: int, game_urls: List[str],
-                     db_path: str = "mlb_games.db") -> Dict[str, Any]:
-    """Build a complete team season"""
-    processor = MLBGameProcessor(db_path)
-    season_name = f"{team_code} {year} Season"
-    return processor.build_season(game_urls, season_name)
-
 def get_processing_summary(db_path: str = "mlb_games.db") -> Dict[str, Any]:
     """Get database processing summary"""
     processor = MLBGameProcessor(db_path)
@@ -945,22 +892,15 @@ def get_processing_summary(db_path: str = "mlb_games.db") -> Dict[str, Any]:
 
 
 # Example usage and testing
-def demo_clean_processor():
-    """Demonstrate the clean processor capabilities"""
+def batch_processor(test_urls: List[str]):
+    """Demonstrate the game processor capabilities"""
     
-    print("MLB Game Data Processor - Clean Version")
+    print("MLB Game Data Processor")
     print("=" * 50)
-    
-    # Test URLs
-    test_urls = [
-        "https://www.baseball-reference.com/boxes/KCA/KCA202503290.shtml",
-        "https://www.baseball-reference.com/boxes/NYA/NYA202505050.shtml",
-        "https://www.baseball-reference.com/boxes/TEX/TEX202505180.shtml"
-    ]
     
     # Initialize processor
     processor = MLBGameProcessor(
-        db_path="database/demo_clean.db",
+        db_path="database/demo_batch.db",
         validation_threshold=95.0,
         max_workers=2
     )
@@ -995,37 +935,32 @@ def demo_clean_processor():
     
     return results
 
-def demo_season_build():
+def full_season_processor(year: str):
     """Demonstrate season building"""
     
-    print("\nSeason Building Demo")
+    print("\nFull Season Batch Processing")
     print("=" * 30)
     
     # Sample URLs for a "mini-season"
-    season_urls = get_games_by_team("NYY", 2025)
+    season_urls = get_games_full_season(year)
     
-    # Build season
-    season_results = build_team_season("NYY", 2025, season_urls, "debug_yankees_season.db")
-    
-    # Print season report
-    report = season_results['season_report']
-    print(f"Season: {report['season_name']}")
-    print(f"Quality Grade: {report['quality_grade']}")
-    print(f"Games: {report['successful_games']}/{report['total_games']} ({report['success_rate']:.1f}%)")
-    print(f"Processing Time: {report['processing_time_hours']:.1f} hours")
-    
-    if report['recommendations']:
-        print(f"\nRecommendations:")
-        for rec in report['recommendations']:
-            print(f"  • {rec}")
+    season_results = batch_processor(season_urls)
     
     return season_results
 
 
 if __name__ == "__main__":
+
+    # Test URLs
+    test_urls = [
+        "https://www.baseball-reference.com/boxes/KCA/KCA202503290.shtml",
+        "https://www.baseball-reference.com/boxes/NYA/NYA202505050.shtml",
+        "https://www.baseball-reference.com/boxes/TEX/TEX202505180.shtml"
+    ]
+
     # Run demos
     print("1. Single Game Processing Demo")
-    single_result = process_single_game("https://www.baseball-reference.com/boxes/KCA/KCA202503290.shtml", "demo_single.db")
+    single_result = process_single_game("https://www.baseball-reference.com/boxes/NYN/NYN202410080.shtml", "database/demo_batch.db")
     if single_result['processing_status'] == 'success':
         print(f"   Success: {single_result['game_id']}")
         validation = single_result['validation_results']
@@ -1035,9 +970,9 @@ if __name__ == "__main__":
         print(f"   Failed: {single_result.get('error_message', 'Unknown error')}")
     
     print("\n2. Batch Processing Demo")
-    batch_results = demo_clean_processor()
+    #batch_results = batch_processor(test_urls)
     
     print("\n3. Season Building Demo")
-    season_results = demo_season_build()
+    #season_results = full_season_processor("2024")
     
     print("\nClean MLB Game Data Processor ready for production use!")

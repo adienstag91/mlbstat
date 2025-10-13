@@ -97,6 +97,7 @@ class PlayerAnalytics:
         JOIN games g ON ba.game_id = g.game_id
         WHERE ba.player_id = ?
           AND strftime('%Y', g.game_date) = ?
+          AND g.is_playoff = '0'
         """
         
         df = pd.read_sql(query, conn, params=(player_id, str(season)))
@@ -396,12 +397,7 @@ class PlayerAnalytics:
 
 # Example usage
 if __name__ == "__main__":
-    analytics = PlayerAnalytics("debug_yankees_season.db")
+    analytics = PlayerAnalytics("database/demo_batch.db")
     
     # Example: Analyze Aaron Judge in a specific game
-    analytics.print_player_analysis("NYA202509280", "judgeaa01")
-    
-    print("Player Analytics Engine Ready")
-    print("\nUsage:")
-    print("  analytics = PlayerAnalytics('demo_season.db')")
-    print("  analytics.print_player_analysis(game_id, player_id)")
+    analytics.print_player_analysis("NYA202409280", "judgeaa01")

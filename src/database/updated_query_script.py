@@ -273,7 +273,7 @@ class MLBDatabaseExplorer:
                         total_calculated,
                         discrepancies_count
                     FROM validation_reports 
-                    ORDER BY accuracy_percentage, discrepancies_count
+                    ORDER BY accuracy_percentage ASC, discrepancies_count DESC
                     LIMIT {limit}
                 """, conn)
                 
@@ -508,5 +508,5 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         db_path = sys.argv[1]
     else:
-        db_path = "mlb_games.db"
+        db_path = "database/demo_batch.db"
     test_query_tools(db_path)
