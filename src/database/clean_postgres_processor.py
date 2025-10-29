@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-MLB Game Data Processor - Clean Production Version
-=================================================
+MLB Game Data Processor - PostgreSQL Production Version
+=======================================================
 
 Processes MLB games with separate batting/pitching tables.
 Supports batch processing and full season builds.
@@ -34,7 +34,7 @@ from parsing.player_bio_parser import parse_player_bio
 from parsing.parsing_utils import extract_game_id
 from parsing.name_to_id_mapper import build_player_id_mapping, add_player_ids_to_events
 from validation.stat_validator import validate_batting_stats, validate_pitching_stats
-from utils.url_cacher import HighPerformancePageFetcher
+from utils.url_cacher import HighPerformancePageFetcher, SimpleFetcher
 from pipeline.game_url_fetcher import get_games_full_season, get_games_by_team
 
 load_dotenv()
@@ -60,7 +60,7 @@ class MLBGameProcessor:
     """
     
     def __init__(self, validation_threshold: float = 95.0, 
-                 max_workers: int = 3, cache_size_mb: int = 500):
+                 max_workers: int = 2, cache_size_mb: int = 500):
         self.validation_threshold = float(validation_threshold)
         self.max_workers = max_workers
         self.logger = self._setup_logging()
@@ -69,16 +69,13 @@ class MLBGameProcessor:
         self.db_params = {
             'host': os.getenv('POSTGRES_HOST', 'localhost'),
             'port': os.getenv('POSTGRES_PORT', '5432'),
-            'database': os.getenv('POSTGRES_DB', 'mlb_stats'),
+            'database': os.getenv('POSTGRES_DB', 'mlb_analytics'),
             'user': os.getenv('POSTGRES_USER', 'postgres'),
             'password': os.getenv('POSTGRES_PASSWORD')
         }
         
         # Initialize fetcher with caching
-        self.fetcher = HighPerformancePageFetcher(
-            cache_dir="cache",
-            max_cache_size_mb=cache_size_mb
-        )
+        self.fetcher = SimpleFetcher()
         
         # Thread lock for database operations
         self.db_lock = threading.Lock()
@@ -99,6 +96,17 @@ class MLBGameProcessor:
         
     def process_single_game(self, game_url: str, halt_on_validation_failure: bool = True) -> Dict[str, Any]:
         """Process a single game with full validation and storage"""
+
+        # Check if game already exists in database
+        if self._game_exists(game_url):
+            game_id = extract_game_id(game_url)
+            self.logger.info(f"Skipping {game_id} - already in database")
+            return {
+                "game_url": game_url,
+                "game_id": game_id,
+                "processing_status": "skipped"
+            }
+
         self.logger.info(f"Processing game: {game_url}")
         start_time = time.time()
         
@@ -186,6 +194,13 @@ class MLBGameProcessor:
                             total_events += len(events)
                         
                         self.logger.info(f"Success: {game_id}")
+                        print(f"{game_id} processed in {result['processing_time']:.2f} seconds")
+                        print(f"Progress: {self.stats['games_processed']}/{len(game_urls)} games ({self.stats['games_processed']/len(game_urls)*100:.1f}%)")
+                        time.sleep(1)
+                    elif result['processing_status'] == 'skipped':
+                        self.logger.info(f"Skipped: {game_id} (already in DB)")
+                        continue  # Don't count as success or failure
+
                     else:
                         self.stats['games_failed'] += 1
                         self.stats['errors'].append({
@@ -251,8 +266,8 @@ class MLBGameProcessor:
         # Date range
         try:
             date_range = pd.read_sql("""
-                SELECT MIN(date) as earliest, MAX(date) as latest
-                FROM games WHERE date IS NOT NULL
+                SELECT MIN(game_date) as earliest, MAX(game_date) as latest
+                FROM games WHERE game_date IS NOT NULL
             """, conn)
             if not date_range.empty:
                 summary['earliest_game'] = date_range.iloc[0]['earliest']
@@ -281,36 +296,27 @@ class MLBGameProcessor:
     
     def _parse_all_data(self, game_url: str) -> Dict[str, Any]:
         """Parse all required data types from game URL"""
-        print("DEBUG: Fetching page...")
         soup = self.fetcher.fetch_page(game_url)
         game_id = extract_game_id(game_url)
         
-        print("DEBUG: Parsing game metadata...")
+        # Parse game metadata
         game_metadata = extract_game_metadata(soup, game_url)
         
-        print("DEBUG: Parsing batting appearances...")
+        # Parse appearances separately
         batting_appearances = parse_batting_appearances(soup, game_id)
-        print(f"DEBUG: Got {len(batting_appearances)} batting appearances")
-        
-        print("DEBUG: Parsing pitching appearances...")
         pitching_appearances = parse_pitching_appearances(soup, game_id)
-        print(f"DEBUG: Got {len(pitching_appearances)} pitching appearances")
 
-        print("DEBUG: Building player ID mapping...")
+        # Build name-to-ID mapping
         name_to_id_mapping = build_player_id_mapping(batting_appearances, pitching_appearances)
         
-        print("DEBUG: Parsing play-by-play events...")
+        # Parse play-by-play events
         play_by_play_events = parse_play_by_play_events(soup, game_id)
-        print(f"DEBUG: Got {len(play_by_play_events)} events")
 
-        print("DEBUG: Adding player IDs to events...")
+         # Add IDs to events using the mapping
         play_by_play_events = add_player_ids_to_events(play_by_play_events, name_to_id_mapping)
         
-        print("DEBUG: Extracting unique players...")
+        # Extract unique players from both appearance tables
         players_encountered = self._extract_unique_players(batting_appearances, pitching_appearances)
-        print(f"DEBUG: Found {len(players_encountered)} unique players")
-        
-        print("DEBUG: _parse_all_data complete!")
         
         return {
             "game_id": game_id,
@@ -323,37 +329,25 @@ class MLBGameProcessor:
     
     def _validate_stats(self, parsing_results: Dict) -> Dict[str, ValidationReport]:
         """Compare official stats vs calculated play-by-play stats"""
-        print("DEBUG: Starting _validate_stats...")
         validation_results = {}
         
-        print("DEBUG: Getting batting stats for validation...")
+        # Extract validation data from appearance DataFrames
         batting_for_validation = get_batting_stats_for_validation(parsing_results["batting_appearances"])
-        print(f"DEBUG: Got {len(batting_for_validation)} batting rows")
-        
-        print("DEBUG: Getting pitching stats for validation...")
         pitching_for_validation = get_pitching_stats_for_validation(parsing_results["pitching_appearances"])
-        print(f"DEBUG: Got {len(pitching_for_validation)} pitching rows")
-        
-        print("DEBUG: Calling _validate_batting_accuracy...")
         
         # Batting validation
-        print("DEBUG: Calling _validate_batting_accuracy...")
         batting_validation = self._validate_batting_accuracy(
             batting_for_validation,
             parsing_results["play_by_play_events"]
         )
-        print(f"DEBUG: Batting validation complete! Accuracy: {batting_validation.accuracy_percentage:.1f}%")
         validation_results["batting"] = batting_validation
-
-        print("DEBUG: Calling _validate_pitching_accuracy...")
+        
+        # Pitching validation  
         pitching_validation = self._validate_pitching_accuracy(
             pitching_for_validation,
             parsing_results["play_by_play_events"]
         )
-        print(f"DEBUG: Pitching validation complete! Accuracy: {pitching_validation.accuracy_percentage:.1f}%")
         validation_results["pitching"] = pitching_validation
-
-        print("DEBUG: Creating overall validation...")
         
         # Overall validation status
         overall_status = ValidationResult.PASS
@@ -378,6 +372,7 @@ class MLBGameProcessor:
     
     def _store_to_database(self, parsing_results: Dict, validation_results: Dict) -> Dict[str, Any]:
         """Store all data to separate database tables"""
+        conn = None
         try:
             conn = psycopg2.connect(**self.db_params)
             cursor = conn.cursor()
@@ -385,11 +380,25 @@ class MLBGameProcessor:
             game_id = parsing_results['game_id']
             
             # Store in dependency order
+            #print("DEBUG: Storing players...")
             players_stored = self._store_players(parsing_results["players_encountered"], cursor)
+            #print(f"DEBUG: Players stored: {players_stored}")
+            
+            #print("DEBUG: Storing game metadata...")
             game_stored = self._store_game_metadata(game_id, parsing_results["game_metadata"], cursor)
+            #print(f"DEBUG: Game metadata stored: {game_stored}")
+            
+            #print("DEBUG: Storing batting appearances...")
             batting_stored = self._store_batting_appearances(game_id, parsing_results["batting_appearances"], cursor)
+            #print(f"DEBUG: Batting appearances stored: {batting_stored}")
+            
+            #print("DEBUG: Storing pitching appearances...")
             pitching_stored = self._store_pitching_appearances(game_id, parsing_results["pitching_appearances"], cursor)
+            #print(f"DEBUG: Pitching appearances stored: {pitching_stored}")
+            
+            #print("DEBUG: Storing play-by-play events...")
             events_stored = self._store_play_by_play_events(game_id, parsing_results["play_by_play_events"], cursor)
+            #print(f"DEBUG: Events stored: {events_stored}")
             
             # Store validation report
             self._store_validation_report(game_id, validation_results, cursor)
@@ -418,10 +427,6 @@ class MLBGameProcessor:
     
     def _validate_batting_accuracy(self, official_stats: pd.DataFrame, events: pd.DataFrame) -> ValidationReport:
         """Compare official batting stats vs calculated from play-by-play"""
-        print(f"DEBUG: Inside _validate_batting_accuracy")
-        print(f"  official_stats shape: {official_stats.shape}")
-        print(f"  events shape: {events.shape}")
-        
         if official_stats.empty or events.empty:
             return ValidationReport(
                 status=ValidationResult.FAIL,
@@ -432,55 +437,33 @@ class MLBGameProcessor:
                 total_calculated=0
             )
         
-        print(f"DEBUG: Converting numeric columns...")
+        # Ensure numeric columns are actually numeric
         numeric_cols = ['PA', 'AB', 'H', 'R', 'RBI', 'BB', 'SO', 'HR', '2B', '3B']
         for col in numeric_cols:
             if col in official_stats.columns:
                 official_stats[col] = pd.to_numeric(official_stats[col], errors='coerce').fillna(0)
         
-        print(f"DEBUG: Calling validate_batting_stats...")
         validation_result = validate_batting_stats(official_stats, events)
-        print(f"DEBUG: validate_batting_stats returned successfully")
-        
-        print(f"DEBUG: Extracting accuracy from result...")
-        print(f"  validation_result type: {type(validation_result)}")
-        print(f"  validation_result keys: {validation_result.keys() if isinstance(validation_result, dict) else 'not a dict'}")
-        
         accuracy = validation_result.get('accuracy', 0.0)
-        print(f"DEBUG: Got accuracy: {accuracy} (type: {type(accuracy)})")
         
-        print(f"DEBUG: Determining status...")
         if accuracy >= self.validation_threshold:
             status = ValidationResult.PASS
         elif accuracy >= 80.0:
             status = ValidationResult.PARTIAL  
         else:
             status = ValidationResult.FAIL
-        print(f"DEBUG: Status: {status}")
-        
-        print(f"DEBUG: Getting discrepancies...")
-        discrepancies = validation_result.get('differences', [])
-        print(f"  discrepancies type: {type(discrepancies)}, length: {len(discrepancies) if isinstance(discrepancies, list) else 'not a list'}")
-        
-        print(f"DEBUG: Creating ValidationReport object...")
-        report = ValidationReport(
+            
+        return ValidationReport(
             status=status,
             accuracy_percentage=accuracy,
             missing_stats=[],
-            discrepancies=discrepancies,
+            discrepancies=validation_result.get('differences', []),
             total_official=len(official_stats),
             total_calculated=validation_result.get('players_compared', 0)
         )
-        print(f"DEBUG: ValidationReport created successfully!")
-        
-        return report
-
+    
     def _validate_pitching_accuracy(self, official_stats: pd.DataFrame, events: pd.DataFrame) -> ValidationReport:
         """Compare official pitching stats vs calculated from play-by-play"""
-        print(f"DEBUG: Inside _validate_pitching_accuracy")
-        print(f"  official_stats shape: {official_stats.shape}")
-        print(f"  events shape: {events.shape}")
-        
         if official_stats.empty or events.empty:
             return ValidationReport(
                 status=ValidationResult.FAIL,
@@ -491,25 +474,13 @@ class MLBGameProcessor:
                 total_calculated=0
             )
         
-        print(f"DEBUG: Converting numeric columns...")
-        # **FIX: Ensure numeric columns are actually numeric**
+        # Ensure numeric columns are actually numeric
         numeric_cols = ['IP', 'BF', 'H', 'R', 'ER', 'BB', 'SO', 'HR']
         for col in numeric_cols:
             if col in official_stats.columns:
-                print(f"  Converting {col}...", end="")
                 official_stats[col] = pd.to_numeric(official_stats[col], errors='coerce').fillna(0)
-                print(f" done")
         
-        print(f"DEBUG: Calling validate_pitching_stats...")
-        try:
-            validation_result = validate_pitching_stats(official_stats, events)
-            print(f"DEBUG: validate_pitching_stats returned successfully")
-        except Exception as e:
-            print(f"DEBUG: ERROR in validate_pitching_stats: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
-        
+        validation_result = validate_pitching_stats(official_stats, events)
         accuracy = validation_result.get('accuracy', 0.0)
         
         if accuracy >= self.validation_threshold:
@@ -518,8 +489,7 @@ class MLBGameProcessor:
             status = ValidationResult.PARTIAL  
         else:
             status = ValidationResult.FAIL
-        
-        print(f"DEBUG: Returning ValidationReport for pitching")    
+            
         return ValidationReport(
             status=status,
             accuracy_percentage=accuracy,
@@ -603,24 +573,26 @@ class MLBGameProcessor:
         return stored_count
     
     def _store_game_metadata(self, game_id: str, game_metadata: Dict, cursor) -> int:
-        """Store game to games table"""
+        """Store game to games table using PostgreSQL UPSERT"""
+        stored_count = 0
         cursor.execute("""
             INSERT INTO games 
-            (game_id, game_date, game_time, home_team, away_team, runs_home_team, runs_away_team, winner, loser, venue, is_playoff, playoff_round, innings_played)
+            (game_id, game_date, game_time, home_team, away_team, runs_home_team, 
+             runs_away_team, winner, loser, venue, is_playoff, playoff_round, innings_played)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (game_id) DO UPDATE SET
-            game_date = EXCLUDED.game_date,
-            game_time = EXCLUDED.game_time,
-            home_team = EXCLUDED.home_team,
-            away_team = EXCLUDED.away_team,
-            runs_home_team = EXCLUDED.runs_home_team,
-            runs_away_team = EXCLUDED.runs_away_team,
-            winner = EXCLUDED.winner,
-            loser = EXCLUDED.loser,
-            venue = EXCLUDED.venue,
-            is_playoff = EXCLUDED.is_playoff,
-            playoff_round = EXCLUDED.playoff_round,
-            innings_played = EXCLUDED.innings_played
+                game_date = EXCLUDED.game_date,
+                game_time = EXCLUDED.game_time,
+                home_team = EXCLUDED.home_team,
+                away_team = EXCLUDED.away_team,
+                runs_home_team = EXCLUDED.runs_home_team,
+                runs_away_team = EXCLUDED.runs_away_team,
+                winner = EXCLUDED.winner,
+                loser = EXCLUDED.loser,
+                venue = EXCLUDED.venue,
+                is_playoff = EXCLUDED.is_playoff,
+                playoff_round = EXCLUDED.playoff_round,
+                innings_played = EXCLUDED.innings_played
         """, (
             game_metadata.get('game_id'),
             game_metadata.get('game_date'), 
@@ -636,7 +608,8 @@ class MLBGameProcessor:
             game_metadata.get('playoff_round'),
             game_metadata.get('innings_played')
         ))
-        return cursor.rowcount
+        stored_count += cursor.rowcount
+        return stored_count
     
     def _store_batting_appearances(self, game_id: str, batting_df: pd.DataFrame, cursor) -> int:
         """Store batting appearances to dedicated table"""
@@ -648,26 +621,31 @@ class MLBGameProcessor:
             # Check if exists
             cursor.execute("""
                 SELECT COUNT(*) FROM batting_appearances 
-                WHERE game_id = ? AND player_id = ?
+                WHERE game_id = %s AND player_id = %s
             """, (game_id, row['player_id']))
             
             if cursor.fetchone()[0] > 0:
                 continue  # Skip duplicate
 
+            # DEBUG: Print the values being inserted
+            #print(f"Inserting batting for {row.get('player_name')}: "
+            #   f"PA={row.get('PA')}, AB={row.get('AB')}, ")
+
             cursor.execute("""
-                INSERT OR REPLACE INTO batting_appearances 
+                INSERT INTO batting_appearances 
                 (game_id, player_id, player_name, team, batting_order, positions_played, 
                  is_starter, is_substitute, PA, AB, H, R, RBI, BB, SO, HR, 
                  doubles, triples, SB, CS, HBP, GDP, SF, SH)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (game_id, player_id) DO NOTHING
             """, (
                 row.get('game_id'), row.get('player_id'), row.get('player_name'),
-                row.get('team'), row.get('batting_order'), row.get('positions_played'),
-                row.get('is_starter', False), row.get('is_substitute', False),
-                row.get('PA', 0), row.get('AB', 0), row.get('H', 0), row.get('R', 0), 
-                row.get('RBI', 0), row.get('BB', 0), row.get('SO', 0), row.get('HR', 0),
-                row.get('2B', 0), row.get('3B', 0), row.get('SB', 0), row.get('CS', 0),
-                row.get('HBP', 0), row.get('GDP', 0), row.get('SF', 0), row.get('SH', 0)
+                row.get('team'), row.get('batting_order') if pd.notna(row.get('batting_order')) else None, 
+                row.get('positions_played'), row.get('is_starter', False), row.get('is_substitute', False),
+                int(row.get('PA', 0)), int(row.get('AB', 0)), int(row.get('H', 0)), int(row.get('R', 0)), 
+                int(row.get('RBI', 0)), int(row.get('BB', 0)), int(row.get('SO', 0)), int(row.get('HR', 0)),
+                int(row.get('2B', 0)), int(row.get('3B', 0)), int(row.get('SB', 0)), int(row.get('CS', 0)),
+                int(row.get('HBP', 0)), int(row.get('GDP', 0)), int(row.get('SF', 0)), int(row.get('SH', 0))
             ))
             stored_count += cursor.rowcount
         return stored_count
@@ -681,19 +659,20 @@ class MLBGameProcessor:
         for _, row in pitching_df.iterrows():
             # Check if exists
             cursor.execute("""
-                SELECT COUNT(*) FROM batting_appearances 
-                WHERE game_id = ? AND player_id = ?
+                SELECT COUNT(*) FROM pitching_appearances 
+                WHERE game_id = %s AND player_id = %s
             """, (game_id, row['player_id']))
             
             if cursor.fetchone()[0] > 0:
                 continue  # Skip duplicate
 
             cursor.execute("""
-                INSERT OR REPLACE INTO pitching_appearances
+                INSERT INTO pitching_appearances
                 (game_id, player_id, player_name, team, is_starter, pitching_order, 
                  decisions, BF, H_allowed, R_allowed, ER, BB_allowed, SO_pitched, 
                  HR_allowed, IP, pitches_thrown)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (game_id, player_id) DO NOTHING
             """, (
                 row.get('game_id'), row.get('player_id'), row.get('player_name'),
                 row.get('team'), row.get('is_starter', False), row.get('pitching_order'),
@@ -713,11 +692,12 @@ class MLBGameProcessor:
         stored_count = 0
         for _, event in events.iterrows():
             cursor.execute("""
-                INSERT OR REPLACE INTO at_bats
+                INSERT INTO at_bats
                 (event_id, game_id, inning, inning_half, batter_id, batter_name, pitcher_id, pitcher_name,
                  description, is_at_bat, is_hit, hit_type, is_walk, is_strikeout,
                  is_out, outs_recorded, bases_reached, event_order)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (event_id) DO NOTHING
             """, (
                 event.get('event_id'), event.get('game_id'),
                 event.get('inning'), event.get('inning_half'),
@@ -739,7 +719,7 @@ class MLBGameProcessor:
                 continue
                 
             cursor.execute("""
-                INSERT OR REPLACE INTO validation_reports
+                INSERT INTO validation_reports
                 (game_id, validation_type, status, accuracy_percentage, 
                  total_official, total_calculated, discrepancies_count)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -761,6 +741,22 @@ class MLBGameProcessor:
             return overall_validation.status == ValidationResult.PASS
         else:
             return overall_validation.status != ValidationResult.FAIL
+
+    def _game_exists(self, game_url: str) -> bool:
+        """Check if game is already in database"""
+        try:
+            game_id = extract_game_id(game_url)
+            conn = psycopg2.connect(**self.db_params)
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT game_id FROM games WHERE game_id = %s", (game_id,))
+            exists = cursor.fetchone() is not None
+            
+            conn.close()
+            return exists
+        except Exception as e:
+            self.logger.warning(f"Could not check if game exists: {e}")
+            return False
     
     def _extract_game_id_from_url(self, url: str) -> str:
         """Extract game ID from URL for error reporting"""
@@ -774,9 +770,141 @@ class MLBGameProcessor:
         try:
             conn = psycopg2.connect(**self.db_params)
             cursor = conn.cursor()
+            
+            # Create tables if they don't exist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS players (
+                    player_id VARCHAR(20) PRIMARY KEY,
+                    full_name VARCHAR(100),
+                    bats VARCHAR(1),
+                    throws VARCHAR(1),
+                    birth_date DATE,
+                    debut_date DATE,
+                    height_inches INTEGER,
+                    weight_lbs INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS games (
+                    game_id VARCHAR(50) PRIMARY KEY,
+                    game_date DATE,
+                    game_time TIME,
+                    home_team VARCHAR(50),
+                    away_team VARCHAR(50),
+                    runs_home_team INTEGER,
+                    runs_away_team INTEGER,
+                    winner VARCHAR(50),
+                    loser VARCHAR(50),
+                    venue VARCHAR(200),
+                    is_playoff BOOLEAN,
+                    playoff_round VARCHAR(50),
+                    innings_played INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS batting_appearances (
+                    id SERIAL PRIMARY KEY,
+                    game_id VARCHAR(50) REFERENCES games(game_id),
+                    player_id VARCHAR(20) REFERENCES players(player_id),
+                    player_name VARCHAR(100),
+                    team VARCHAR(50),
+                    batting_order INTEGER,
+                    positions_played VARCHAR(50),
+                    is_starter BOOLEAN,
+                    is_substitute BOOLEAN,
+                    PA INTEGER DEFAULT 0,
+                    AB INTEGER DEFAULT 0,
+                    H INTEGER DEFAULT 0,
+                    R INTEGER DEFAULT 0,
+                    RBI INTEGER DEFAULT 0,
+                    BB INTEGER DEFAULT 0,
+                    SO INTEGER DEFAULT 0,
+                    HR INTEGER DEFAULT 0,
+                    doubles INTEGER DEFAULT 0,
+                    triples INTEGER DEFAULT 0,
+                    SB INTEGER DEFAULT 0,
+                    CS INTEGER DEFAULT 0,
+                    HBP INTEGER DEFAULT 0,
+                    GDP INTEGER DEFAULT 0,
+                    SF INTEGER DEFAULT 0,
+                    SH INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(game_id, player_id)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pitching_appearances (
+                    id SERIAL PRIMARY KEY,
+                    game_id VARCHAR(50) REFERENCES games(game_id),
+                    player_id VARCHAR(20) REFERENCES players(player_id),
+                    player_name VARCHAR(100),
+                    team VARCHAR(50),
+                    is_starter BOOLEAN,
+                    pitching_order INTEGER,
+                    decisions VARCHAR(10),
+                    BF INTEGER DEFAULT 0,
+                    H_allowed INTEGER DEFAULT 0,
+                    R_allowed INTEGER DEFAULT 0,
+                    ER INTEGER DEFAULT 0,
+                    BB_allowed INTEGER DEFAULT 0,
+                    SO_pitched INTEGER DEFAULT 0,
+                    HR_allowed INTEGER DEFAULT 0,
+                    IP NUMERIC(4,1) DEFAULT 0.0,
+                    pitches_thrown INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(game_id, player_id)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS at_bats (
+                    event_id VARCHAR(100) PRIMARY KEY,
+                    game_id VARCHAR(50) REFERENCES games(game_id),
+                    inning INTEGER,
+                    inning_half VARCHAR(10),
+                    batter_id VARCHAR(20) REFERENCES players(player_id),
+                    batter_name VARCHAR(100),
+                    pitcher_id VARCHAR(20) REFERENCES players(player_id),
+                    pitcher_name VARCHAR(100),
+                    description TEXT,
+                    is_at_bat BOOLEAN,
+                    is_hit BOOLEAN,
+                    hit_type VARCHAR(20),
+                    is_walk BOOLEAN,
+                    is_strikeout BOOLEAN,
+                    is_out BOOLEAN,
+                    outs_recorded INTEGER DEFAULT 0,
+                    bases_reached INTEGER DEFAULT 0,
+                    event_order INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS validation_reports (
+                    id SERIAL PRIMARY KEY,
+                    game_id VARCHAR(50) REFERENCES games(game_id),
+                    validation_type VARCHAR(20),
+                    status VARCHAR(20),
+                    accuracy_percentage NUMERIC(5,2),
+                    total_official INTEGER,
+                    total_calculated INTEGER,
+                    discrepancies_count INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(game_id, validation_type)
+                )
+            """)
+            
             conn.commit()
             cursor.close()
             conn.close()
+            self.logger.info("✅ Database schema initialized")
+            
         except Exception as e:
             self.logger.error(f"Database initialization failed: {e}")
             raise e
@@ -796,7 +924,7 @@ def process_single_game(game_url: str, validation_threshold: float = 99.0) -> Di
     processor = MLBGameProcessor(validation_threshold)
     return processor.process_single_game(game_url)
 
-def process_game_list(game_urls: List[str], max_workers: int = 3, validation_threshold: float = 99.0) -> Dict[str, Any]:
+def process_game_list(game_urls: List[str], max_workers: int = 2, validation_threshold: float = 99.0) -> Dict[str, Any]:
     """Process a list of games with batch processing"""
     processor = MLBGameProcessor(validation_threshold, max_workers)
     return processor.process_multiple_games(game_urls)
@@ -839,7 +967,7 @@ def batch_processor(test_urls: List[str]):
     
     if results['errors']:
         print(f"\nErrors ({len(results['errors'])}):")
-        for error in results['errors'][:3]:  # Show first 3
+        for error in results['errors']:
             print(f"  {error['game_id']}: {error['error']}")
     
     # Database summary
@@ -856,7 +984,7 @@ def full_season_processor(year: str):
     print("\nFull Season Batch Processing")
     print("=" * 30)
     
-    # Sample URLs for a "mini-season"
+    # Get all games for the season
     season_urls = get_games_full_season(year)
     
     season_results = batch_processor(season_urls)
@@ -875,19 +1003,21 @@ if __name__ == "__main__":
 
     # Run demos
     print("1. Single Game Processing Demo")
-    single_result = process_single_game("https://www.baseball-reference.com/boxes/NYN/NYN202410080.shtml")
-    if single_result['processing_status'] == 'success':
-        print(f"   Success: {single_result['game_id']}")
-        validation = single_result['validation_results']
-        print(f"   Batting: {validation['batting'].accuracy_percentage:.1f}%")
-        print(f"   Pitching: {validation['pitching'].accuracy_percentage:.1f}%")
-    else:
-        print(f"   Failed: {single_result.get('error_message', 'Unknown error')}")
+    #single_result = process_single_game("https://www.baseball-reference.com/boxes/NYN/NYN202410080.shtml")
+    #if single_result['processing_status'] == 'success':
+    #    print(f"   Success: {single_result['game_id']}")
+    #    validation = single_result['validation_results']
+    #    print(f"   Batting: {validation['batting'].accuracy_percentage:.1f}%")
+    #    print(f"   Pitching: {validation['pitching'].accuracy_percentage:.1f}%")
+    #else:
+    #    print(f"   Failed: {single_result.get('error_message', 'Unknown error')}")
     
     print("\n2. Batch Processing Demo")
+    # Uncomment to run batch processing
     #batch_results = batch_processor(test_urls)
     
     print("\n3. Season Building Demo")
-    #season_results = full_season_processor("2024")
+    # Uncomment to run full season
+    season_results = full_season_processor("2021")
     
-    print("\nClean MLB Game Data Processor ready for production use!")
+    print("\n✅ Clean MLB Game Data Processor ready for production use!")

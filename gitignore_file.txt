@@ -168,3 +168,8 @@ results/
 *.log
 logs/
 debug_output/
+
+.env
+*.db
+__pycache__/
+.DS_Store

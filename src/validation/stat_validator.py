@@ -106,6 +106,17 @@ def compare_stats(official: pd.DataFrame, parsed: pd.DataFrame, stats: List[str]
             'name_mismatches': mismatch_info
         }
     
+    # **FIX: Ensure all stat columns are numeric in both official and parsed**
+    for stat in stats:
+        # Convert official stat column
+        if stat in comparison.columns:
+            comparison[stat] = pd.to_numeric(comparison[stat], errors='coerce').fillna(0)
+        
+        # Convert parsed stat column
+        parsed_col = f'parsed_{stat}'
+        if parsed_col in comparison.columns:
+            comparison[parsed_col] = pd.to_numeric(comparison[parsed_col], errors='coerce').fillna(0)
+    
     total_diffs = 0
     total_stats = 0
     differences = []
@@ -150,7 +161,15 @@ def validate_batting_stats(official: pd.DataFrame, events: pd.DataFrame) -> Dict
     if official.empty or events.empty:
         return {'accuracy': 0, 'players_compared': 0}
 
+    # **FIX: Convert to numeric BEFORE any mathematical operations**
     meaningful_columns = ['PA', 'AB', 'H', 'BB', 'SO', 'HR', '2B', '3B', 'SB', 'CS', 'HBP', 'GDP', 'SF', 'SH']
+    
+    # Ensure all columns are numeric
+    for col in meaningful_columns:
+        if col in official.columns:
+            official[col] = pd.to_numeric(official[col], errors='coerce').fillna(0)
+    
+    # Now safe to sum and compare
     meaningful_stats = official[meaningful_columns].sum(axis=1) > 0
     official = official[meaningful_stats]
     
@@ -188,6 +207,14 @@ def validate_pitching_stats(official: pd.DataFrame, events: pd.DataFrame) -> Dic
     """Validate pitching by aggregating events"""
     if official.empty or events.empty:
         return {'accuracy': 0, 'players_compared': 0}
+    
+    # **FIX: Convert to numeric BEFORE any mathematical operations**
+    numeric_columns = ['BF', 'H', 'BB', 'SO', 'HR', 'R', 'ER', 'IP']
+    
+    # Ensure all columns are numeric
+    for col in numeric_columns:
+        if col in official.columns:
+            official[col] = pd.to_numeric(official[col], errors='coerce').fillna(0)
     
     parsed = events.groupby('pitcher_name').agg({
         'is_plate_appearance': 'sum',
