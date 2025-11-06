@@ -207,7 +207,7 @@ def debug_worst_game():
     debugger = GameDebugger()
     
     # The worst game from your data
-    worst_game_url = "https://www.baseball-reference.com/boxes/SDN/SDN202503310.shtml"
+    worst_game_url = "https://www.baseball-reference.com/boxes/SFN/SFN201904070.shtml"
     
     results = debugger.debug_game_in_detail(worst_game_url)
     debugger.compare_with_official_stats(results)

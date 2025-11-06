@@ -31,9 +31,13 @@ def process_single_game(game_url: str, display_results: bool = True) -> Dict:
     
     game_id = extract_game_id(game_url)
     
-    # Parse official stats first
-    official_batting = parse_batting_appearances(soup, game_id)
-    official_pitching = parse_pitching_appearances(soup, game_id)
+    # Parse appearances
+    batting_appearances = parse_batting_appearances(soup, game_id)
+    pitching_appearances = parse_pitching_appearances(soup, game_id)
+
+    # Convert to validation format
+    official_batting = get_batting_stats_for_validation(batting_appearances)
+    official_pitching = get_pitching_stats_for_validation(pitching_appearances)
     
     # Parse events
     pbp_events = parse_play_by_play_events(soup, game_id)

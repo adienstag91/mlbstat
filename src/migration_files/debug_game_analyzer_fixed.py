@@ -162,7 +162,7 @@ def debug_worst_game():
     debugger = GameDebugger()
     
     # URL for the game with 0 events
-    worst_game_url = "https://www.baseball-reference.com/boxes/ANA/ANA202504060.shtml"
+    worst_game_url = "https://www.baseball-reference.com/boxes/SFN/SFN201904070.shtml"
     
     results = debugger.debug_game_in_detail(worst_game_url)
     

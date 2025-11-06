@@ -16,7 +16,7 @@ fetcher = HighPerformancePageFetcher(max_cache_size_mb=500)
 from parsing.parsing_utils import extract_game_id
 
 
-def extract_game_metadata(soup: BeautifulSoup, game_url: str) -> Dict:
+def extract_game_metadata(soup: BeautifulSoup, game_id: str) -> Dict:
     """Extract metadata using HTML structure, not regex patterns"""
     
     scorebox = soup.find('div', class_='scorebox')
@@ -31,8 +31,7 @@ def extract_game_metadata(soup: BeautifulSoup, game_url: str) -> Dict:
     winner, loser = determine_winner_loser(home_team, away_team, runs_home, runs_away)
     
     metadata = {
-        'game_id': extract_game_id(game_url),
-        'game_url': game_url,
+        'game_id': game_id,
         'home_team': home_team,
         'away_team': away_team,
         'runs_home_team': runs_home,
@@ -319,8 +318,9 @@ def get_playoff_round(soup: BeautifulSoup) -> Optional[str]:
 if __name__ == "__main__":
     game_url = "https://www.baseball-reference.com/boxes/LAN/LAN202410250.shtml"
     fetcher = SimpleFetcher()
+    game_id = extract_game_id(game_url)
     soup = fetcher.fetch_page(game_url)
-    test_meta_data = extract_game_metadata(soup,game_url)
+    test_meta_data = extract_game_metadata(soup, game_url, game_id)
     print(f"Game ID: {test_meta_data['game_id']}")
     print(f"Game Date: {test_meta_data['game_date']}")
     print(f"Game Time: {test_meta_data['game_time']}")

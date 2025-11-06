@@ -1,0 +1,136 @@
+"""
+Simple Game Debugger
+===================
+
+Debug games to see exactly which players have differences and why.
+"""
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pandas as pd
+from pipeline.game_processor import process_single_game
+
+def debug_game(game_url: str):
+    """
+    Debug a single game - show which players have differences and their events
+    """
+    print(f"\n{'='*80}")
+    print(f"DEBUGGING: {game_url}")
+    print(f"{'='*80}\n")
+    
+    # Process the game
+    result = process_single_game(game_url, display_results=False)
+    
+    game_id = result['game_id']
+    bat_val = result['batting_validation']
+    pit_val = result['pitching_validation']
+    
+    print(f"Game ID: {game_id}")
+    print(f"Batting Accuracy: {bat_val['accuracy']:.1f}%")
+    print(f"Pitching Accuracy: {pit_val['accuracy']:.1f}%")
+    print(f"Total Events: {len(result['pbp_events'])}\n")
+    
+    # Debug batting differences
+    if bat_val.get('differences'):
+        print(f"\nBATTING DIFFERENCES ({len(bat_val['differences'])} players):")
+        print("-"*80)
+        
+        for diff in bat_val['differences']:
+            player = diff['player']
+            print(f"\n{player}:")
+            print(f"  Differences: {', '.join(diff['diffs'])}")
+            
+            # Get official stats
+            official_row = result['official_batting'][result['official_batting']['player_name'] == player]
+            if not official_row.empty:
+                official = official_row.iloc[0]
+                
+                # Get parsed stats from events
+                player_events = result['pbp_events'][result['pbp_events']['batter_name'] == player]
+                
+                print(f"\n  Official vs Parsed:")
+                print(f"    PA:  {int(official.get('PA', 0)):2d} vs {int(player_events['is_plate_appearance'].sum()):2d}")
+                print(f"    AB:  {int(official.get('AB', 0)):2d} vs {int(player_events['is_at_bat'].sum()):2d}")
+                print(f"    H:   {int(official.get('H', 0)):2d} vs {int(player_events['is_hit'].sum()):2d}")
+                print(f"    BB:  {int(official.get('BB', 0)):2d} vs {int(player_events['is_walk'].sum()):2d}")
+                print(f"    SO:  {int(official.get('SO', 0)):2d} vs {int(player_events['is_strikeout'].sum()):2d}")
+                print(f"    HR:  {int(official.get('HR', 0)):2d} vs {int((player_events['hit_type'] == 'home_run').sum()):2d}")
+                print(f"    SF:  {int(official.get('SF', 0)):2d} vs {int(player_events['is_sacrifice_fly'].sum()):2d}")
+                print(f"    SH:  {int(official.get('SH', 0)):2d} vs {int(player_events['is_sacrifice_hit'].sum()):2d}")
+                
+                # Show events
+                if not player_events.empty:
+                    print(f"\n  Events ({len(player_events)} total):")
+                    for idx, (_, event) in enumerate(player_events.iterrows(), 1):
+                        pa = "PA" if event['is_plate_appearance'] else "  "
+                        ab = "AB" if event['is_at_bat'] else "  "
+                        hit = "H" if event['is_hit'] else " "
+                        bb = "BB" if event['is_walk'] else "  "
+                        so = "SO" if event['is_strikeout'] else "  "
+                        print(f"    {idx:2d}. [{pa}][{ab}][{hit}][{bb}][{so}] {event['description']}")
+                else:
+                    print(f"\n  No events found for this player!")
+    else:
+        print("\nNo batting differences!")
+    
+    # Debug pitching differences
+    if pit_val.get('differences'):
+        print(f"\n\nPITCHING DIFFERENCES ({len(pit_val['differences'])} pitchers):")
+        print("-"*80)
+        
+        for diff in pit_val['differences']:
+            pitcher = diff['player']
+            print(f"\n{pitcher}:")
+            print(f"  Differences: {', '.join(diff['diffs'])}")
+            
+            # Get official stats
+            official_row = result['official_pitching'][result['official_pitching']['pitcher_name'] == pitcher]
+            if not official_row.empty:
+                official = official_row.iloc[0]
+                
+                # Get parsed stats from events
+                pitcher_events = result['pbp_events'][result['pbp_events']['pitcher_name'] == pitcher]
+                
+                print(f"\n  Official vs Parsed:")
+                print(f"    BF:  {int(official.get('BF', 0)):2d} vs {int(pitcher_events['is_plate_appearance'].sum()):2d}")
+                print(f"    H:   {int(official.get('H', 0)):2d} vs {int(pitcher_events['is_hit'].sum()):2d}")
+                print(f"    BB:  {int(official.get('BB', 0)):2d} vs {int(pitcher_events['is_walk'].sum()):2d}")
+                print(f"    SO:  {int(official.get('SO', 0)):2d} vs {int(pitcher_events['is_strikeout'].sum()):2d}")
+                print(f"    HR:  {int(official.get('HR', 0)):2d} vs {int((pitcher_events['hit_type'] == 'home_run').sum()):2d}")
+                
+                print(f"\n  Total events faced: {len(pitcher_events)}")
+    else:
+        print("\nNo pitching differences!")
+    
+    print(f"\n{'='*80}\n")
+    
+    return result
+
+
+def debug_multiple_games(game_urls: list):
+    """Debug multiple games"""
+    print(f"\nDebugging {len(game_urls)} games...\n")
+    
+    for i, url in enumerate(game_urls, 1):
+        print(f"\n[{i}/{len(game_urls)}]")
+        try:
+            debug_game(url)
+        except Exception as e:
+            print(f"ERROR: {e}\n")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python simple_game_debugger.py <game_url> [game_url2] [game_url3] ...")
+        print("\nExample:")
+        print("  python simple_game_debugger.py https://www.baseball-reference.com/boxes/ATL/ATL202010140.shtml")
+        sys.exit(1)
+    
+    game_urls = sys.argv[1:]
+    
+    if len(game_urls) == 1:
+        debug_game(game_urls[0])
+    else:
+        debug_multiple_games(game_urls)

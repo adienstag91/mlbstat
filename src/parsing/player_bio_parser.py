@@ -237,7 +237,7 @@ if __name__ == "__main__":
     
     fetcher = SimpleFetcher()
     
-    bio = parse_player_bio("ohtansh01", fetcher)
+    bio = parse_player_bio("sabatc.01", fetcher)
     
     print("Player Bio Data:")
     print(f"  Name: {bio['full_name']}")

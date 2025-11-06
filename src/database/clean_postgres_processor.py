@@ -93,26 +93,36 @@ class MLBGameProcessor:
             'start_time': None,
             'errors': []
         }
-        
+
+        # Issue tracking
+        self.issues = {
+            'low_accuracy_games': [],      # < 100% accuracy
+            'null_accuracy_games': [],     # 0% accuracy (validation failed)
+            'failed_games': [],            # Processing failures
+            'player_mapping_failures': [], # CC Sabathia type issues
+            'skipped_games': []            # Already in database
+        }
+            
     def process_single_game(self, game_url: str, halt_on_validation_failure: bool = True) -> Dict[str, Any]:
         """Process a single game with full validation and storage"""
 
+        self.logger.info(f"Processing game: {game_url}")
+        game_id = extract_game_id(game_url)
+        start_time = time.time()
+
         # Check if game already exists in database
         if self._game_exists(game_url):
-            game_id = extract_game_id(game_url)
             self.logger.info(f"Skipping {game_id} - already in database")
+            self.issues['skipped_games'].append(game_id)
             return {
                 "game_url": game_url,
                 "game_id": game_id,
                 "processing_status": "skipped"
             }
-
-        self.logger.info(f"Processing game: {game_url}")
-        start_time = time.time()
         
         try:
             # Parse all data types
-            parsing_results = self._parse_all_data(game_url)
+            parsing_results = self._parse_all_data(game_url, game_id)
             
             # Validate stats accuracy 
             validation_results = self._validate_stats(parsing_results)
@@ -121,10 +131,65 @@ class MLBGameProcessor:
             if self._should_store_data(validation_results, halt_on_validation_failure):
                 with self.db_lock:
                     db_results = self._store_to_database(parsing_results, validation_results)
+
+                # CHECK IF STORAGE ACTUALLY SUCCEEDED
+                if db_results.get("status") != "success":
+                    # Database storage failed!
+                    processing_time = time.time() - start_time
+                    error_msg = db_results.get("error_message", "Unknown database error")
+                    self.logger.error(f"Storage failed: {game_id} - {error_msg}")
+                    
+                    # Track as failed game
+                    self.issues['failed_games'].append({
+                        'game_id': game_id,
+                        'url': game_url,
+                        'error': f"Database storage failed: {error_msg}"
+                    })
+                    
+                    return {
+                        "game_url": game_url,
+                        "game_id": game_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "processing_time": processing_time,
+                        "parsing_results": parsing_results,
+                        "validation_results": validation_results,
+                        "database_results": db_results,
+                        "processing_status": "error",
+                        "error_message": f"Database storage failed: {error_msg}"
+                    }
             else:
                 db_results = {"status": "skipped", "reason": "validation_failed"}
                 
             processing_time = time.time() - start_time
+
+            # Get validation accuracies for logging
+            bat_acc = validation_results['batting'].accuracy_percentage
+            pit_acc = validation_results['pitching'].accuracy_percentage
+            # Color-coded status
+            bat_status = "✅" if bat_acc == 100.0 else "⚠️" if bat_acc >= 99.0 else "❌"
+            pit_status = "✅" if pit_acc == 100.0 else "⚠️" if pit_acc >= 99.0 else "❌"
+
+
+            # Log with accuracy and performance
+            self.logger.info(
+                f"Success: {game_id} | {bat_status} Bat: {bat_acc:.1f}% | {pit_status} Pit: {pit_acc:.1f}% | {processing_time:.2f}s"
+            )
+            
+            # Track issues
+            if bat_acc < 100.0 or pit_acc < 100.0:
+                self.issues['low_accuracy_games'].append({
+                    'game_id': game_id,
+                    'batting_accuracy': bat_acc,
+                    'pitching_accuracy': pit_acc
+                })
+            
+            if bat_acc == 0 or pit_acc == 0:
+                self.issues['null_accuracy_games'].append({
+                    'game_id': game_id,
+                    'batting_accuracy': bat_acc,
+                    'pitching_accuracy': pit_acc
+                })
+            
                 
             return {
                 "game_url": game_url,
@@ -140,6 +205,12 @@ class MLBGameProcessor:
         except Exception as e:
             processing_time = time.time() - start_time
             self.logger.error(f"Processing failed for {game_url}: {str(e)}")
+            self.issues['failed_games'].append({
+                'game_id': game_id,
+                'url': game_url,
+                'error': str(e)
+            })
+
             return {
                 "game_url": game_url,
                 "timestamp": datetime.now().isoformat(),
@@ -193,12 +264,9 @@ class MLBGameProcessor:
                         if not events.empty:
                             total_events += len(events)
                         
-                        self.logger.info(f"Success: {game_id}")
-                        print(f"{game_id} processed in {result['processing_time']:.2f} seconds")
                         print(f"Progress: {self.stats['games_processed']}/{len(game_urls)} games ({self.stats['games_processed']/len(game_urls)*100:.1f}%)")
                         time.sleep(1)
                     elif result['processing_status'] == 'skipped':
-                        self.logger.info(f"Skipped: {game_id} (already in DB)")
                         continue  # Don't count as success or failure
 
                     else:
@@ -207,7 +275,6 @@ class MLBGameProcessor:
                             'game_id': game_id,
                             'error': result.get('error_message', 'Unknown error')
                         })
-                        self.logger.error(f"Failed: {game_id} - {result.get('error_message', 'Unknown error')}")
                         
                 except Exception as e:
                     game_id = self._extract_game_id_from_url(url)
@@ -242,6 +309,7 @@ class MLBGameProcessor:
         }
         
         self.logger.info(f"Batch complete: {self.stats['games_processed']}/{total_games} successful ({success_rate:.1f}%)")
+        self.print_issues_summary()
         
         return {
             'results': results,
@@ -293,14 +361,69 @@ class MLBGameProcessor:
         
         conn.close()
         return summary
+
+    def print_issues_summary(self):
+        """Print detailed summary of all issues encountered"""
+        
+        print("\n" + "="*80)
+        print("📊 PROCESSING ISSUES SUMMARY")
+        print("="*80)
+        
+        # Skipped games
+        if self.issues['skipped_games']:
+            print(f"\nℹ️  SKIPPED (already in database): {len(self.issues['skipped_games'])} games")
+        
+        # Low accuracy games
+        if self.issues['low_accuracy_games']:
+            print(f"\n⚠️  GAMES WITH < 100% ACCURACY: {len(self.issues['low_accuracy_games'])} games")
+            print("-"*80)
+            for issue in self.issues['low_accuracy_games'][:15]:  # Show first 15
+                print(f"  {issue['game_id']}: Bat: {issue['batting_accuracy']:.1f}% | Pit: {issue['pitching_accuracy']:.1f}%")
+            if len(self.issues['low_accuracy_games']) > 15:
+                print(f"  ... and {len(self.issues['low_accuracy_games']) - 15} more")
+        else:
+            print("\n✅ No games with accuracy < 100%")
+        
+        # NULL accuracy games
+        if self.issues['null_accuracy_games']:
+            print(f"\n❌ GAMES WITH NULL/0% ACCURACY: {len(self.issues['null_accuracy_games'])} games")
+            print("-"*80)
+            for issue in self.issues['null_accuracy_games']:
+                print(f"  {issue['game_id']}: Bat: {issue['batting_accuracy']:.1f}% | Pit: {issue['pitching_accuracy']:.1f}%")
+        else:
+            print("\n✅ No games with NULL accuracy")
+        
+        # Player mapping failures
+        if self.issues['player_mapping_failures']:
+            print(f"\n❌ PLAYER MAPPING FAILURES: {len(self.issues['player_mapping_failures'])} games")
+            print("-"*80)
+            for issue in self.issues['player_mapping_failures'][:15]:
+                players = ', '.join(issue['unmapped_players'][:3])
+                if len(issue['unmapped_players']) > 3:
+                    players += f" (+ {len(issue['unmapped_players']) - 3} more)"
+                print(f"  {issue['game_id']}: {players}")
+            if len(self.issues['player_mapping_failures']) > 15:
+                print(f"  ... and {len(self.issues['player_mapping_failures']) - 15} more")
+        else:
+            print("\n✅ No player mapping failures")
+        
+        # Failed games
+        if self.issues['failed_games']:
+            print(f"\n❌ COMPLETELY FAILED GAMES: {len(self.issues['failed_games'])} games")
+            print("-"*80)
+            for issue in self.issues['failed_games']:
+                print(f"  {issue['game_id']}: {issue['error'][:60]}")
+        else:
+            print("\n✅ No completely failed games")
+        
+        print("\n" + "="*80)
     
-    def _parse_all_data(self, game_url: str) -> Dict[str, Any]:
+    def _parse_all_data(self, game_url: str, game_id: str) -> Dict[str, Any]:
         """Parse all required data types from game URL"""
         soup = self.fetcher.fetch_page(game_url)
-        game_id = extract_game_id(game_url)
         
         # Parse game metadata
-        game_metadata = extract_game_metadata(soup, game_url)
+        game_metadata = extract_game_metadata(soup, game_id)
         
         # Parse appearances separately
         batting_appearances = parse_batting_appearances(soup, game_id)
@@ -757,6 +880,21 @@ class MLBGameProcessor:
         except Exception as e:
             self.logger.warning(f"Could not check if game exists: {e}")
             return False
+
+    def _player_exists(self, player_id: str) -> bool:
+        """Check if player is already in database"""
+        try:
+            conn = psycopg2.connect(**self.db_params)
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT player_id FROM player WHERE player_id = %s", (player_id,))
+            exists = cursor.fetchone() is not None
+            
+            conn.close()
+            return exists
+        except Exception as e:
+            self.logger.warning(f"Could not check if game exists: {e}")
+            return False
     
     def _extract_game_id_from_url(self, url: str) -> str:
         """Extract game ID from URL for error reporting"""
@@ -996,9 +1134,10 @@ if __name__ == "__main__":
 
     # Test URLs
     test_urls = [
-        "https://www.baseball-reference.com/boxes/KCA/KCA202503290.shtml",
-        "https://www.baseball-reference.com/boxes/NYA/NYA202505050.shtml",
-        "https://www.baseball-reference.com/boxes/TEX/TEX202505180.shtml"
+        "https://www.baseball-reference.com/boxes/PHI/PHI201804200.shtml",
+        "https://www.baseball-reference.com/boxes/CHI/CHA201804230.shtml",
+        "https://www.baseball-reference.com/boxes/SDN/SDN201805040.shtml",
+        "https://www.baseball-reference.com/boxes/TBA/TBA201809270.shtml"
     ]
 
     # Run demos
@@ -1014,10 +1153,10 @@ if __name__ == "__main__":
     
     print("\n2. Batch Processing Demo")
     # Uncomment to run batch processing
-    #batch_results = batch_processor(test_urls)
+    batch_results = batch_processor(test_urls)
     
     print("\n3. Season Building Demo")
     # Uncomment to run full season
-    season_results = full_season_processor("2021")
+    #season_results = full_season_processor("2018")
     
     print("\n✅ Clean MLB Game Data Processor ready for production use!")
