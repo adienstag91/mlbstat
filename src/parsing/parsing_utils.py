@@ -94,7 +94,7 @@ def extract_player_id(html_cell) -> Optional[str]:
     if link and link.get('href'):
         href = link.get('href')
         # Extract player ID from URL
-        match = re.search(r'/players/[a-z]/([^.]+)\.shtml', href)
+        match = re.search(r'/players/[a-z]/([a-z\.\d]+)\.shtml', href)
         if match:
             return match.group(1)
     

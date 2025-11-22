@@ -95,26 +95,37 @@ def parse_batting_appearances(soup: BeautifulSoup, game_id: str) -> pd.DataFrame
             data_rows = [row for row in html_rows if row.find('td')]
             
             current_batting_order = 1
+
+            # Track actual row count for HTML alignment
+            html_row_counter = 0
             
             for row_idx, row in df.iterrows():
                 raw_batting_entry = str(row['Batting'])
                 
                 # Extract player info using modular functions
                 clean_name, positions = extract_name_and_positions(raw_batting_entry)
+
+                # CRITICAL FIX: Skip invalid rows (like "Batting" header duplicates)
+                # These mess up HTML row alignment
+                if not clean_name or clean_name.lower() == 'batting':
+                    continue
                 
                 # Get corresponding HTML row
                 html_row = data_rows[row_idx] if row_idx < len(data_rows) else None
                 player_id = extract_player_id(html_row.find_all(['td', 'th'])[0] if html_row else None)
                 is_indented = check_html_indentation(html_row)
-                
-                # Skip pitchers entirely from batting appearances
-                is_pitcher = 'P' in positions or bool(re.search(r'\s+P\s*$', raw_batting_entry))
-                if is_pitcher:
-                    continue
+
+                # Increment HTML row counter for next valid player
+                html_row_counter += 1
                 
                 # Get stats
                 pa = safe_int(row.get('PA', 0))
                 ab = safe_int(row.get('AB', 0))
+
+                # Skip pitchers without PAs entirely from batting appearances
+                is_pitcher = 'P' in positions or bool(re.search(r'\s+P\s*$', raw_batting_entry))
+                if is_pitcher and pa == 0 and ab == 0:
+                    continue
                 
                 # Determine starter status using modular function
                 appearance_info = determine_batting_order_and_starter_status(
@@ -404,21 +415,22 @@ def test_refactored_appearances(test_url):
     if not batting_df.empty:
         print(f"\nBATTING APPEARANCES ({len(batting_df)}):")
         print(f"Columns: {list(batting_df.columns)}")
-        print(batting_df[['player_name', 'team', 'batting_order', 'positions_played', 
+        print(batting_df[['player_name', 'player_id', 'team', 'batting_order', 'positions_played', 
                          'is_starter', 'PA', 'AB', 'H', 'HR']])
     
     # Show pitching appearances  
     if not pitching_df.empty:
         print(f"\nPITCHING APPEARANCES ({len(pitching_df)}):")
         print(f"Columns: {list(pitching_df.columns)}")
-        print(pitching_df[['player_name', 'team', 'is_starter', 'decisions', 
+        print(pitching_df[['player_name', 'player_id', 'team', 'is_starter', 'decisions', 
                           'BF', 'H_allowed', 'BB_allowed', 'SO_pitched']])
     
     return result
 
 if __name__ == "__main__":
     # Test both scenarios
-    test_url = "https://www.baseball-reference.com/boxes/LAN/LAN202509160.shtml"
+    test_url = "https://www.baseball-reference.com/boxes/TOR/TOR202511010.shtml"
+    #test_url = "https://www.baseball-reference.com/boxes/ARI/ARI201909240.shtml"
     test_refactored_appearances(test_url)
     print("\n" + "="*60 + "\n")
-    test_ohtani_scenario()
+    #test_ohtani_scenario()

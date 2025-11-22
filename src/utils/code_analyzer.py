@@ -174,7 +174,9 @@ def main():
         "migration_files", 
         "__pycache__",
         "archive",
-        ".git"
+        ".git",
+        "reprocessing_reports",
+        "cache"
     ]
     
     analyzer = SimpleCodeAnalyzer(directory_path, exclude_folders)

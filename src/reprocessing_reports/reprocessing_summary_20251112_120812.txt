@@ -1,0 +1,32 @@
+======================================================================
+GAMES WITH VALIDATION DIFFERENCES - REPROCESSING REPORT
+======================================================================
+
+Generated: 20251112_120812
+Total games to reprocess: 39
+
+Batting Accuracy Range:
+  Min: 93.56%
+  Max: 99.56%
+  Avg: 98.60%
+
+Pitching Accuracy Range:
+  Min: 91.23%
+  Max: 99.32%
+  Avg: 98.09%
+
+Date Range:
+  Earliest: 2018-04-20
+  Latest: 2024-07-25
+
+Games by Team:
+  TBR: 6 games
+  MIL: 5 games
+  CHW: 5 games
+  SFG: 5 games
+  MIN: 5 games
+  ATL: 4 games
+  TEX: 4 games
+  LAD: 3 games
+  SEA: 3 games
+  PHI: 3 games

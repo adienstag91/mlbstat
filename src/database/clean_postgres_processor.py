@@ -87,6 +87,7 @@ class MLBGameProcessor:
         self.stats = {
             'games_processed': 0,
             'games_failed': 0,
+            'skipped_games': 0,
             'total_events': 0,
             'avg_batting_accuracy': 0,
             'avg_pitching_accuracy': 0,
@@ -267,6 +268,7 @@ class MLBGameProcessor:
                         print(f"Progress: {self.stats['games_processed']}/{len(game_urls)} games ({self.stats['games_processed']/len(game_urls)*100:.1f}%)")
                         time.sleep(1)
                     elif result['processing_status'] == 'skipped':
+                        self.stats['skipped_games'] += 1
                         continue  # Don't count as success or failure
 
                     else:
@@ -299,6 +301,7 @@ class MLBGameProcessor:
             'total_games': total_games,
             'successful_games': self.stats['games_processed'],
             'failed_games': self.stats['games_failed'],
+            'skipped_games': self.stats['skipped_games'],
             'success_rate': success_rate,
             'total_events': total_events,
             'avg_batting_accuracy': self.stats['avg_batting_accuracy'],
@@ -1097,6 +1100,7 @@ def batch_processor(test_urls: List[str]):
     print(f"  Total Games: {summary['total_games']}")
     print(f"  Successful: {summary['successful_games']} ({summary['success_rate']:.1f}%)")
     print(f"  Failed: {summary['failed_games']}")
+    print(f"  Skipped: {summary['skipped_games']}")
     print(f"  Total Events: {summary['total_events']:,}")
     print(f"  Avg Batting Accuracy: {summary['avg_batting_accuracy']:.1f}%")
     print(f"  Avg Pitching Accuracy: {summary['avg_pitching_accuracy']:.1f}%")
@@ -1153,10 +1157,10 @@ if __name__ == "__main__":
     
     print("\n2. Batch Processing Demo")
     # Uncomment to run batch processing
-    batch_results = batch_processor(test_urls)
+    #batch_results = batch_processor(test_urls)
     
     print("\n3. Season Building Demo")
     # Uncomment to run full season
-    #season_results = full_season_processor("2018")
+    season_results = full_season_processor("2019")
     
     print("\n✅ Clean MLB Game Data Processor ready for production use!")

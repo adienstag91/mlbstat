@@ -16,7 +16,7 @@ from typing import List, Optional
 import re
 import time
 from utils.url_cacher import HighPerformancePageFetcher
-fetcher = HighPerformancePageFetcher("NYY_Debug2.db",max_cache_size_mb=500)
+fetcher = HighPerformancePageFetcher("cache",max_cache_size_mb=500)
 
 
 
