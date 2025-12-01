@@ -1,36 +1,36 @@
 -- Delete in reverse dependency order (children first, then parents)
 
--- 1. Delete validation reports for 2023 games
+-- 1. Delete validation reports for 2019 games
 DELETE FROM validation_reports 
 WHERE game_id IN (
     SELECT game_id FROM games 
-    WHERE EXTRACT(YEAR FROM game_date) = 2023
+    WHERE EXTRACT(YEAR FROM game_date) = 2019
 );
 
--- 2. Delete at_bats for 2023 games
+-- 2. Delete at_bats for 2019 games
 DELETE FROM at_bats 
 WHERE game_id IN (
     SELECT game_id FROM games 
-    WHERE EXTRACT(YEAR FROM game_date) = 2023
+    WHERE EXTRACT(YEAR FROM game_date) = 2019
 );
 
--- 3. Delete batting appearances for 2023 games
+-- 3. Delete batting appearances for 2019 games
 DELETE FROM batting_appearances 
 WHERE game_id IN (
     SELECT game_id FROM games 
-    WHERE EXTRACT(YEAR FROM game_date) = 2023
+    WHERE EXTRACT(YEAR FROM game_date) = 2019
 );
 
--- 4. Delete pitching appearances for 2023 games
+-- 4. Delete pitching appearances for 2019 games
 DELETE FROM pitching_appearances 
 WHERE game_id IN (
     SELECT game_id FROM games 
-    WHERE EXTRACT(YEAR FROM game_date) = 2023
+    WHERE EXTRACT(YEAR FROM game_date) = 2019
 );
 
--- 5. Delete 2023 games
+-- 5. Delete 2019 games
 DELETE FROM games 
-WHERE EXTRACT(YEAR FROM game_date) = 2023;
+WHERE EXTRACT(YEAR FROM game_date) = 2019;
 
 -- Check what's left
 SELECT 

@@ -128,7 +128,7 @@ def compare_stats(official: pd.DataFrame, parsed: pd.DataFrame, stats: List[str]
             diffs = comparison[f'{stat}_diff'].abs().sum()
             total_diffs += diffs
             total_stats += comparison[stat].sum()
-    
+
     for _, row in comparison.iterrows():
         player_diffs = []
         for stat in stats:
@@ -146,6 +146,7 @@ def compare_stats(official: pd.DataFrame, parsed: pd.DataFrame, stats: List[str]
             })
     
     accuracy = ((total_stats - total_diffs) / total_stats * 100) if total_stats > 0 else 0
+    print(f"accuracy - {accuracy}")
     
     return {
         'accuracy': accuracy,

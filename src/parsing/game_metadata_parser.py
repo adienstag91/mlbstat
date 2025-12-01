@@ -316,11 +316,11 @@ def get_playoff_round(soup: BeautifulSoup) -> Optional[str]:
     return 'Playoff'
 
 if __name__ == "__main__":
-    game_url = "https://www.baseball-reference.com/boxes/LAN/LAN202410250.shtml"
+    game_url = "https://www.baseball-reference.com/boxes/ARI/ARI201909240.shtml"
     fetcher = SimpleFetcher()
     game_id = extract_game_id(game_url)
     soup = fetcher.fetch_page(game_url)
-    test_meta_data = extract_game_metadata(soup, game_url, game_id)
+    test_meta_data = extract_game_metadata(soup, game_id)
     print(f"Game ID: {test_meta_data['game_id']}")
     print(f"Game Date: {test_meta_data['game_date']}")
     print(f"Game Time: {test_meta_data['game_time']}")

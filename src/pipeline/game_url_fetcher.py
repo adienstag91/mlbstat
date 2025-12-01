@@ -15,8 +15,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import re
 import time
-from utils.url_cacher import HighPerformancePageFetcher
-fetcher = HighPerformancePageFetcher("cache",max_cache_size_mb=500)
+from utils.url_cacher import HighPerformancePageFetcher, SimpleFetcher
+fetcher = SimpleFetcher()
 
 
 

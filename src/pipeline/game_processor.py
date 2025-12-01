@@ -24,9 +24,9 @@ from parsing.appearances_parser import (
     get_batting_stats_for_validation,
     get_pitching_stats_for_validation
 )
+from parsing.name_to_id_mapper import build_player_id_mapping, add_player_ids_to_events
 from parsing.events_parser import parse_play_by_play_events
 from parsing.game_metadata_parser import extract_game_metadata
-from parsing.name_to_id_mapper import build_player_id_mapping, add_player_ids_to_events
 from parsing.player_bio_parser import fetch_player_bio_if_needed
 from validation.stat_validator import validate_batting_stats, validate_pitching_stats
 from utils.url_cacher import SimpleFetcher
@@ -34,6 +34,9 @@ from utils.url_cacher import SimpleFetcher
 # Import database operations
 from database.db_operations import store_game_data
 from database.db_connection import check_game_exists
+
+# Create logger at module level (prevents duplicate handlers)
+module_logger = logging.getLogger(__name__)
 
 fetcher = SimpleFetcher()
 
@@ -74,12 +77,7 @@ def process_game(
     
     # Setup logging
     if logger is None:
-        logger = logging.getLogger(__name__)
-        if not logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-            logger.addHandler(handler)
-            logger.setLevel(logging.INFO)
+        logger = module_logger
     
     game_id = extract_game_id(game_url)
     start_time = time.time()
@@ -216,16 +214,16 @@ def _parse_all_data(game_url: str, game_id: str, logger: logging.Logger) -> Dict
     soup = fetcher.fetch_page(game_url)
     
     # Parse game metadata
-    game_metadata = extract_game_metadata(soup, game_id)
-
+    game_metadata = extract_game_metadata(soup, game_url)
+    
     # Parse appearances
     batting_appearances = parse_batting_appearances(soup, game_id)
     pitching_appearances = parse_pitching_appearances(soup, game_id)
     
     # Parse play-by-play events
     pbp_events = parse_play_by_play_events(soup, game_id)
-
-     # Build name-to-ID mapping from appearances
+    
+    # Build name-to-ID mapping from appearances
     name_to_id_mapping = build_player_id_mapping(batting_appearances, pitching_appearances)
     
     # Enrich events with player IDs

@@ -1,0 +1,12 @@
+MLB Batch Processing Summary - 20251128_151922
+==================================================
+
+Games Processed: 951
+Successful: 951
+Stored: 951
+Skipped: 0
+Failed: 0
+Validation Failures: 0
+
+Time: 3915.0s
+Avg per game: 4.1s

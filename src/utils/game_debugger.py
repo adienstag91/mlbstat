@@ -10,7 +10,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
-from pipeline.game_processor import process_single_game
+from pipeline.game_processor import process_game
 
 def debug_game(game_url: str):
     """
@@ -21,16 +21,16 @@ def debug_game(game_url: str):
     print(f"{'='*80}\n")
     
     # Process the game
-    result = process_single_game(game_url, display_results=False)
+    result = process_game(game_url)
     
     game_id = result['game_id']
-    bat_val = result['batting_validation']
-    pit_val = result['pitching_validation']
+    bat_val = result['validation_results']['batting']
+    pit_val = result['validation_results']['pitching']
     
     print(f"Game ID: {game_id}")
     print(f"Batting Accuracy: {bat_val['accuracy']:.1f}%")
     print(f"Pitching Accuracy: {pit_val['accuracy']:.1f}%")
-    print(f"Total Events: {len(result['pbp_events'])}\n")
+    print(f"Total Events: {len(result['parsing_results']['pbp_events'])}\n")
     
     # Debug batting differences
     if bat_val.get('differences'):
@@ -43,12 +43,12 @@ def debug_game(game_url: str):
             print(f"  Differences: {', '.join(diff['diffs'])}")
             
             # Get official stats
-            official_row = result['official_batting'][result['official_batting']['player_name'] == player]
+            official_row = result['parsing_results']['batting_appearances'][result['parsing_results']['batting_appearances']['player_name'] == player]
             if not official_row.empty:
                 official = official_row.iloc[0]
                 
                 # Get parsed stats from events
-                player_events = result['pbp_events'][result['pbp_events']['batter_name'] == player]
+                player_events = result['parsing_results']['pbp_events'][result['parsing_results']['pbp_events']['batter_name'] == player]
                 
                 print(f"\n  Official vs Parsed:")
                 print(f"    PA:  {int(official.get('PA', 0)):2d} vs {int(player_events['is_plate_appearance'].sum()):2d}")
@@ -86,12 +86,12 @@ def debug_game(game_url: str):
             print(f"  Differences: {', '.join(diff['diffs'])}")
             
             # Get official stats
-            official_row = result['official_pitching'][result['official_pitching']['pitcher_name'] == pitcher]
+            official_row = result['parsing_results']['pitching_appearances'][result['parsing_results']['pitching_appearances']['pitcher_name'] == pitcher]
             if not official_row.empty:
                 official = official_row.iloc[0]
                 
                 # Get parsed stats from events
-                pitcher_events = result['pbp_events'][result['pbp_events']['pitcher_name'] == pitcher]
+                pitcher_events = result['parsing_results']['pbp_events'][result['parsing_results']['pbp_events']['pitcher_name'] == pitcher]
                 
                 print(f"\n  Official vs Parsed:")
                 print(f"    BF:  {int(official.get('BF', 0)):2d} vs {int(pitcher_events['is_plate_appearance'].sum()):2d}")
@@ -126,7 +126,7 @@ if __name__ == "__main__":
         print("Usage: python simple_game_debugger.py <game_url> [game_url2] [game_url3] ...")
         print("\nExample:")
         print("  python simple_game_debugger.py https://www.baseball-reference.com/boxes/ATL/ATL202010140.shtml")
-        sys.exit(1)
+        #sys.exit(1)
     
     #game_urls = sys.argv[1:]
     game_urls = [
@@ -139,6 +139,7 @@ if __name__ == "__main__":
         "https://www.baseball-reference.com/boxes/CHA/CHA201808210.shtml",
         "https://www.baseball-reference.com/boxes/CHA/CHA201906010.shtml",
         "https://www.baseball-reference.com/boxes/CHN/CHN201906250.shtml",
+        "https://www.baseball-reference.com/boxes/CHN/CHN202205301.shtml",
         "https://www.baseball-reference.com/boxes/CIN/CIN201907180.shtml",
         "https://www.baseball-reference.com/boxes/CLE/CLE202205190.shtml",
         "https://www.baseball-reference.com/boxes/COL/COL201810070.shtml",
@@ -154,6 +155,7 @@ if __name__ == "__main__":
         "https://www.baseball-reference.com/boxes/MIL/MIL202307040.shtml",
         "https://www.baseball-reference.com/boxes/MIN/MIN201907220.shtml",
         "https://www.baseball-reference.com/boxes/MIN/MIN201908070.shtml",
+        "https://www.baseball-reference.com/boxes/NYN/NYN202205290.shtml",
         "https://www.baseball-reference.com/boxes/OAK/OAK202307010.shtml",
         "https://www.baseball-reference.com/boxes/PHI/PHI201804200.shtml",
         "https://www.baseball-reference.com/boxes/PHI/PHI201904250.shtml",
@@ -163,15 +165,18 @@ if __name__ == "__main__":
         "https://www.baseball-reference.com/boxes/SFN/SFN201809120.shtml",
         "https://www.baseball-reference.com/boxes/SFN/SFN201904070.shtml",
         "https://www.baseball-reference.com/boxes/SFN/SFN201908090.shtml",
+        "https://www.baseball-reference.com/boxes/SFN/SFN202308020.shtml",
         "https://www.baseball-reference.com/boxes/TBA/TBA201806260.shtml",
         "https://www.baseball-reference.com/boxes/TBA/TBA201807250.shtml",
         "https://www.baseball-reference.com/boxes/TBA/TBA201904240.shtml",
         "https://www.baseball-reference.com/boxes/TBA/TBA201907240.shtml",
         "https://www.baseball-reference.com/boxes/TEX/TEX201808160.shtml",
         "https://www.baseball-reference.com/boxes/TEX/TEX202209200.shtml",
+        "https://www.baseball-reference.com/boxes/WAS/WAS202408280.shtml",
     ]
     
     if len(game_urls) == 1:
         debug_game(game_urls[0])
     else:
-        debug_multiple_games(game_urls)
+        debug_game(game_urls[0])
+        #debug_multiple_games(game_urls)
